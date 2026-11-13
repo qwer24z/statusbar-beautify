@@ -5,14 +5,17 @@ import android.content.res.Resources;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
 import android.graphics.Outline;
+import android.graphics.Paint;
 import android.graphics.drawable.BitmapDrawable;
-import android.graphics.drawable.ColorDrawable;
+import android.os.Environment;
 import android.util.Base64;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewOutlineProvider;
 
+import java.io.File;
 import java.util.Collections;
 import java.util.Set;
 import java.util.WeakHashMap;
@@ -21,17 +24,13 @@ import de.robv.android.xposed.XSharedPreferences;
 
 /**
  * 跑在 com.android.systemui 进程里，把图铺成状态栏那层 View 的背景。
- * 配置优先走 ContentProvider（跨进程可靠），读不到再退回 XSharedPreferences。
- * 各种失败都用不同底色标出来，没日志也能看状态栏颜色判断。
+ * 图片三条路：media 目录里 App 存的文件 → ContentProvider 的 Base64 → XSharedPreferences。
+ * 一条都拿不到就画品红/青棋盘格，这个颜色不会被误认成系统主题色。
  */
 final class Beautifier {
 
-    /** 洋红：连配置都拿不到 */
-    private static final int COLOR_NO_CONFIG = 0x99FF00FF;
-    /** 淡蓝：配置拿到了，但没选图 */
-    private static final int COLOR_NO_IMAGE = 0x5500C8FF;
-    /** 橙色：图拿到了，解码失败 */
-    private static final int COLOR_DECODE_FAIL = 0x99FF9800;
+    private static final String TAG = "SBBeautify";
+    private static final String MEDIA_IMAGE = "statusbar.jpg";
 
     private static final Set<View> DONE = Collections.newSetFromMap(new WeakHashMap<View, Boolean>());
 
@@ -43,8 +42,7 @@ final class Beautifier {
             return;
         }
         DONE.add(root);
-        Diag.log("attach " + root.getClass().getName()
-                + " " + root.getWidth() + "x" + root.getHeight());
+        Diag.log("attach " + root.getClass().getName() + " " + root.getWidth() + "x" + root.getHeight());
         if (root.getWidth() > 0 && root.getHeight() > 0) {
             install(root);
             return;
@@ -64,36 +62,24 @@ final class Beautifier {
     private static void install(View root) {
         try {
             Cfg cfg = Cfg.load();
-            if (cfg == null) {
-                root.setBackground(new ColorDrawable(COLOR_NO_CONFIG));
-                Diag.log("配置读不到，刷洋红");
+            if (cfg != null && !cfg.enabled) {
+                Diag.log("模块被关闭");
                 return;
             }
-            Diag.log("配置 enabled=" + cfg.enabled + " imageLen=" + cfg.imageLen()
-                    + " via=" + cfg.via);
-            if (!cfg.enabled) {
-                return;
-            }
-            if (cfg.image == null || cfg.image.isEmpty()) {
-                root.setBackground(new ColorDrawable(COLOR_NO_IMAGE));
-                Diag.log("无图，刷淡蓝");
-                return;
-            }
-
-            byte[] bytes = Base64.decode(cfg.image, Base64.NO_WRAP);
-            Bitmap src = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+            Bitmap src = loadImage(cfg);
             if (src == null) {
-                root.setBackground(new ColorDrawable(COLOR_DECODE_FAIL));
-                Diag.log("解码失败，刷橙色");
+                root.setBackground(new BitmapDrawable(root.getResources(), checker(root.getWidth(), root.getHeight())));
+                root.setClipToOutline(false);
+                Diag.log("拿不到图，画棋盘格");
                 return;
             }
+            int dim = cfg == null ? 0 : Math.max(0, Math.min(80, cfg.dim));
+            int blurPx = cfg == null ? 0
+                    : Math.round(Math.max(0, cfg.blur) * Resources.getSystem().getDisplayMetrics().density);
+            int cornerPx = cfg == null ? 0
+                    : Math.round(Math.max(0, cfg.corner) * Resources.getSystem().getDisplayMetrics().density);
 
-            float density = Resources.getSystem().getDisplayMetrics().density;
-            int blurPx = Math.round(Math.max(0, cfg.blur) * density);
-            int cornerPx = Math.round(Math.max(0, cfg.corner) * density);
-
-            Bitmap bmp = RenderUtil.render(src, root.getWidth(), root.getHeight(),
-                    Math.max(0, Math.min(80, cfg.dim)), blurPx);
+            Bitmap bmp = RenderUtil.render(src, root.getWidth(), root.getHeight(), dim, blurPx);
             if (bmp == null) {
                 return;
             }
@@ -116,10 +102,68 @@ final class Beautifier {
                 root.setClipToOutline(false);
             }
             Diag.log("铺图完成 " + root.getWidth() + "x" + root.getHeight()
-                    + " dim=" + cfg.dim + " blur=" + blurPx + " corner=" + cornerPx);
+                    + " from=" + imageFrom);
         } catch (Throwable t) {
             Diag.log("install 失败 " + t);
         }
+    }
+
+    private static String imageFrom = "?";
+
+    private static Bitmap loadImage(Cfg cfg) {
+        Bitmap file = loadFromMedia();
+        if (file != null) {
+            imageFrom = "media-file";
+            Diag.log("用 media 文件里的图 " + file.getWidth() + "x" + file.getHeight());
+            return file;
+        }
+        if (cfg != null && cfg.image != null && !cfg.image.isEmpty()) {
+            try {
+                byte[] bytes = Base64.decode(cfg.image, Base64.NO_WRAP);
+                Bitmap bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                if (bmp != null) {
+                    imageFrom = "config(" + cfg.via + ")";
+                    Diag.log("用配置里的图 " + bmp.getWidth() + "x" + bmp.getHeight());
+                    return bmp;
+                }
+            } catch (Throwable t) {
+                Diag.log("配置里的图解码失败 " + t);
+            }
+        }
+        return null;
+    }
+
+    static File mediaImageFile() {
+        return new File(new File(Environment.getExternalStorageDirectory(),
+                "Android/media/" + Prefs.MODULE_PKG), MEDIA_IMAGE);
+    }
+
+    private static Bitmap loadFromMedia() {
+        try {
+            File f = mediaImageFile();
+            if (!f.exists() || f.length() <= 0) {
+                return null;
+            }
+            return BitmapFactory.decodeFile(f.getAbsolutePath());
+        } catch (Throwable t) {
+            Diag.log("读 media 文件失败 " + t);
+            return null;
+        }
+    }
+
+    private static Bitmap checker(int w, int h) {
+        Bitmap bmp = Bitmap.createBitmap(Math.max(1, w), Math.max(1, h), Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bmp);
+        Paint paint = new Paint();
+        int cell = Math.max(10, Math.min(w, h) / 5);
+        for (int y = 0; y < h; y += cell) {
+            for (int x = 0; x < w; x += cell) {
+                boolean even = ((x / cell) + (y / cell)) % 2 == 0;
+                paint.setColor(even ? 0xFFFF00FF : 0xFF00FFFF);
+                canvas.drawRect(x, y, x + cell, y + cell, paint);
+            }
+        }
+        return bmp;
     }
 
     private static final class Cfg {
@@ -130,10 +174,6 @@ final class Beautifier {
         int blur = Prefs.DEF_BLUR;
         String via = "?";
 
-        int imageLen() {
-            return image == null ? 0 : image.length();
-        }
-
         static Cfg load() {
             Cfg fromProvider = loadFromProvider();
             if (fromProvider != null) {
@@ -142,7 +182,6 @@ final class Beautifier {
                     return fromProvider;
                 }
             }
-            // provider 通了但没图时，再试一次老通道，两条路都走满
             Cfg fromPrefs = loadFromXSharedPrefs();
             if (fromPrefs != null) {
                 fromPrefs.via = "xsharedprefs";

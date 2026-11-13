@@ -9,6 +9,7 @@ import android.graphics.ImageDecoder;
 import android.graphics.Outline;
 import android.graphics.Typeface;
 import android.net.Uri;
+import android.os.Environment;
 import android.os.Bundle;
 import android.util.Base64;
 import android.view.View;
@@ -24,6 +25,8 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 
 /**
  * 模块的设置页：选图、看预览、调圆角 / 暗化 / 模糊。
@@ -201,6 +204,7 @@ public class SettingsActivity extends Activity {
                 source = null;
             }
         }
+        ensureMediaFile();
         updateImageState();
         renderPreview();
     }
@@ -330,7 +334,42 @@ public class SettingsActivity extends Activity {
         } catch (Throwable t) {
             Toast.makeText(this, "保存失败：" + t, Toast.LENGTH_LONG).show();
         }
+        writeMediaFile(bm);
         updateImageState();
+    }
+
+    /** 另存一份到 /sdcard/Android/media，SystemUI 直接读这个文件，不靠配置同步 */
+    private void writeMediaFile(Bitmap bm) {
+        try {
+            File dir = new File(Environment.getExternalStorageDirectory(),
+                    "Android/media/" + Prefs.MODULE_PKG);
+            if (!dir.exists() && !dir.mkdirs()) {
+                return;
+            }
+            File out = new File(dir, "statusbar.jpg");
+            FileOutputStream fos = new FileOutputStream(out);
+            try {
+                bm.compress(Bitmap.CompressFormat.JPEG, 90, fos);
+            } finally {
+                fos.close();
+            }
+        } catch (Throwable t) {
+            Toast.makeText(this, "写 media 文件失败：" + t, Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void ensureMediaFile() {
+        if (source == null) {
+            return;
+        }
+        try {
+            File f = new File(new File(Environment.getExternalStorageDirectory(),
+                    "Android/media/" + Prefs.MODULE_PKG), "statusbar.jpg");
+            if (!f.exists() || f.length() <= 0) {
+                writeMediaFile(source);
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     // ---------------- 杂项 ----------------
