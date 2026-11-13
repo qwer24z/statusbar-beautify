@@ -5,6 +5,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Outline;
 import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.ColorDrawable;
 import android.util.Base64;
 import android.view.Gravity;
 import android.view.View;
@@ -15,14 +16,14 @@ import java.util.Set;
 import java.util.WeakHashMap;
 
 import de.robv.android.xposed.XSharedPreferences;
-import de.robv.android.xposed.XposedBridge;
 
 /**
  * 跑在 com.android.systemui 进程里，把图铺成状态栏那层 View 的背景。
+ * 没配置图片时先刷一层淡蓝，用来确认钩子到底有没有生效。
  */
 final class Beautifier {
 
-    private static final String TAG = "SBBeautify";
+    private static final int PROBE_COLOR = 0x5500C8FF;
     private static final Set<View> DONE = Collections.newSetFromMap(new WeakHashMap<View, Boolean>());
 
     private Beautifier() {
@@ -33,6 +34,8 @@ final class Beautifier {
             return;
         }
         DONE.add(root);
+        Diag.log("attach " + root.getClass().getName()
+                + " " + root.getWidth() + "x" + root.getHeight());
         if (root.getWidth() > 0 && root.getHeight() > 0) {
             install(root);
             return;
@@ -51,11 +54,34 @@ final class Beautifier {
 
     private static void install(View root) {
         try {
-            Cfg cfg = Cfg.load();
-            if (cfg == null) {
+            XSharedPreferences p = new XSharedPreferences(Prefs.MODULE_PKG, Prefs.FILE);
+            boolean enabled = p.getBoolean(Prefs.KEY_ENABLED, true);
+            String b64 = p.getString(Prefs.KEY_IMAGE, null);
+            Diag.log("配置 enabled=" + enabled + " imageLen=" + (b64 == null ? 0 : b64.length()));
+
+            if (!enabled) {
                 return;
             }
-            Bitmap bmp = RenderUtil.render(cfg.image, root.getWidth(), root.getHeight(), cfg.dim, cfg.blurPx);
+            if (b64 == null || b64.isEmpty()) {
+                // 没有图：刷一层淡蓝，证明钩子通了、只是缺图或读不到配置
+                root.setBackground(new ColorDrawable(PROBE_COLOR));
+                Diag.log("无图，刷了测试底色 " + Integer.toHexString(PROBE_COLOR));
+                return;
+            }
+
+            byte[] bytes = Base64.decode(b64, Base64.NO_WRAP);
+            Bitmap src = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+            if (src == null) {
+                Diag.log("图片解码失败");
+                return;
+            }
+
+            float density = Resources.getSystem().getDisplayMetrics().density;
+            int dim = Math.max(0, Math.min(80, p.getInt(Prefs.KEY_DIM, Prefs.DEF_DIM)));
+            int blurPx = Math.round(Math.max(0, p.getInt(Prefs.KEY_BLUR, Prefs.DEF_BLUR)) * density);
+            int cornerPx = Math.round(Math.max(0, p.getInt(Prefs.KEY_CORNER, Prefs.DEF_CORNER)) * density);
+
+            Bitmap bmp = RenderUtil.render(src, root.getWidth(), root.getHeight(), dim, blurPx);
             if (bmp == null) {
                 return;
             }
@@ -63,8 +89,8 @@ final class Beautifier {
             drawable.setGravity(Gravity.FILL);
             root.setBackground(drawable);
 
-            final int corner = cfg.cornerPx;
-            if (corner > 0) {
+            if (cornerPx > 0) {
+                final int corner = cornerPx;
                 root.setOutlineProvider(new ViewOutlineProvider() {
                     @Override
                     public void getOutline(View v, Outline outline) {
@@ -77,43 +103,10 @@ final class Beautifier {
             } else {
                 root.setClipToOutline(false);
             }
+            Diag.log("铺图完成 " + root.getWidth() + "x" + root.getHeight()
+                    + " dim=" + dim + " blur=" + blurPx + " corner=" + cornerPx);
         } catch (Throwable t) {
-            XposedBridge.log(TAG + ": 安装背景失败 " + t);
-        }
-    }
-
-    private static final class Cfg {
-        Bitmap image;
-        int dim;
-        int blurPx;
-        int cornerPx;
-
-        static Cfg load() {
-            try {
-                XSharedPreferences p = new XSharedPreferences(Prefs.MODULE_PKG, Prefs.FILE);
-                if (!p.getBoolean(Prefs.KEY_ENABLED, true)) {
-                    return null;
-                }
-                String b64 = p.getString(Prefs.KEY_IMAGE, null);
-                if (b64 == null || b64.isEmpty()) {
-                    return null;
-                }
-                byte[] bytes = Base64.decode(b64, Base64.NO_WRAP);
-                Bitmap src = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-                if (src == null) {
-                    return null;
-                }
-                float density = Resources.getSystem().getDisplayMetrics().density;
-                Cfg c = new Cfg();
-                c.image = src;
-                c.dim = Math.max(0, Math.min(80, p.getInt(Prefs.KEY_DIM, Prefs.DEF_DIM)));
-                c.blurPx = Math.round(Math.max(0, p.getInt(Prefs.KEY_BLUR, Prefs.DEF_BLUR)) * density);
-                c.cornerPx = Math.round(Math.max(0, p.getInt(Prefs.KEY_CORNER, Prefs.DEF_CORNER)) * density);
-                return c;
-            } catch (Throwable t) {
-                XposedBridge.log(TAG + ": 读配置失败 " + t);
-                return null;
-            }
+            Diag.log("install 失败 " + t);
         }
     }
 }

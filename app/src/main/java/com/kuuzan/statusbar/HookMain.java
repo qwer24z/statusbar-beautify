@@ -1,5 +1,6 @@
 package com.kuuzan.statusbar;
 
+import android.os.Build;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -11,13 +12,11 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
- * 两层找法：
- *  1) 窗口层：挂 WindowManagerImpl#addView，认 WindowManager.LayoutParams 里
- *     type == TYPE_STATUS_BAR(2000) 的那个窗口，把图铺在它的 DecorView 上。
- *     厂商改类名改不到窗口类型，这一层给 ColorOS / OriginOS 这类留后路。
- *  2) 类名层：AOSP / 类原生 的 CollapsedStatusBarFragment（11+）
- *     和 StatusBar / PhoneStatusBar 的 makeStatusBarView（10 及以前）。
- * 两条都命中也没事，两层铺的是同一张图。
+ * 三层找法：
+ *  1) 窗口层：WindowManagerImpl#addView 里 type == TYPE_STATUS_BAR(2000) 的窗口，铺在 DecorView
+ *  2) 窗口层备胎：ViewRootImpl#setView，同样看 WindowManager.LayoutParams 的类型
+ *  3) 类名层：CollapsedStatusBarFragment（11+）/ StatusBar / PhoneStatusBar（10 及以前）
+ * 每一步都写诊断日志，命中与否一看就知道。
  */
 public class HookMain implements IXposedHookLoadPackage {
 
@@ -41,25 +40,42 @@ public class HookMain implements IXposedHookLoadPackage {
         if (!isSystemUi(lp)) {
             return;
         }
+        Diag.log("进入进程 " + lp.packageName + " sdk=" + Build.VERSION.SDK_INT);
+        hookSystemUiApp(lp.classLoader);
         hookStatusBarWindow(lp.classLoader);
+        hookViewRoot(lp.classLoader);
         for (String cls : CLASSES) {
             for (String method : METHODS) {
                 hook(lp.classLoader, cls, method);
             }
         }
+        Diag.log("钩子安装完毕");
     }
 
     private static boolean isSystemUi(XC_LoadPackage.LoadPackageParam lp) {
         if (SYSTEMUI.equals(lp.packageName)) {
             return true;
         }
-        // 有的厂商把 SystemUI 挪到自家包名下，包名里一般还留着 systemui
         String pkg = lp.packageName == null ? "" : lp.packageName.toLowerCase();
         String proc = lp.processName == null ? "" : lp.processName.toLowerCase();
         return pkg.contains("systemui") || proc.contains("systemui");
     }
 
-    /** 窗口类型兜底：不依赖任何 SystemUI 类名 */
+    /** 证明模块确实进了 SystemUI 进程 */
+    private static void hookSystemUiApp(ClassLoader cl) {
+        try {
+            Class<?> clazz = XposedHelpers.findClass("com.android.systemui.SystemUIApplication", cl);
+            XposedBridge.hookAllMethods(clazz, "onCreate", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    Diag.log("SystemUIApplication.onCreate 被调到");
+                }
+            });
+        } catch (Throwable t) {
+            Diag.log("找不到 SystemUIApplication: " + t);
+        }
+    }
+
     private static void hookStatusBarWindow(ClassLoader cl) {
         try {
             XposedHelpers.findAndHookMethod("android.view.WindowManagerImpl", cl,
@@ -74,13 +90,37 @@ public class HookMain implements IXposedHookLoadPackage {
                             if (attrs.type != WindowManager.LayoutParams.TYPE_STATUS_BAR) {
                                 return;
                             }
-                            View decor = (View) param.args[0];
-                            XposedBridge.log(TAG + ": 命中状态栏窗口，铺在 DecorView 上");
-                            Beautifier.attach(decor);
+                            Diag.log("WindowManagerImpl.addView 命中状态栏窗口");
+                            Beautifier.attach((View) param.args[0]);
                         }
                     });
         } catch (Throwable t) {
-            XposedBridge.log(TAG + ": 窗口兜底挂不上 " + t);
+            Diag.log("窗口兜底挂不上 " + t);
+        }
+    }
+
+    private static void hookViewRoot(ClassLoader cl) {
+        try {
+            Class<?> clazz = XposedHelpers.findClass("android.view.ViewRootImpl", cl);
+            XposedBridge.hookAllMethods(clazz, "setView", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    Object raw = param.args.length > 1 ? param.args[1] : null;
+                    if (!(raw instanceof WindowManager.LayoutParams)) {
+                        return;
+                    }
+                    if (((WindowManager.LayoutParams) raw).type != WindowManager.LayoutParams.TYPE_STATUS_BAR) {
+                        return;
+                    }
+                    Object view = param.args[0];
+                    if (view instanceof View) {
+                        Diag.log("ViewRootImpl.setView 命中状态栏窗口");
+                        Beautifier.attach((View) view);
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            Diag.log("ViewRootImpl 兜底挂不上 " + t);
         }
     }
 
@@ -100,14 +140,13 @@ public class HookMain implements IXposedHookLoadPackage {
                         view = (View) param.thisObject;
                     }
                     if (view != null) {
-                        XposedBridge.log(TAG + ": 命中 " + className + "#" + methodName);
+                        Diag.log("类名层命中 " + className + "#" + methodName);
                         Beautifier.attach(view);
                     }
                 }
             });
         } catch (Throwable t) {
-            // 类/方法不存在属于正常情况，换下一个候选
-            XposedBridge.log(TAG + ": 跳过 " + className + "#" + methodName);
+            Diag.log("跳过 " + className + "#" + methodName);
         }
     }
 }
