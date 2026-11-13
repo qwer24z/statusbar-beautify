@@ -1,0 +1,54 @@
+plugins {
+    id 'com.android.application'
+}
+
+// 有签名材料才签 release，否则 assembleRelease 出 unsigned 包
+def sbStore = System.getenv('SB_STORE_FILE') ?: project.findProperty('sb.storeFile')
+
+android {
+    namespace 'com.kuuzan.statusbar'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.kuuzan.statusbar"
+        minSdk 29
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    signingConfigs {
+        release {
+            if (sbStore) {
+                storeFile rootProject.file(sbStore)
+                storePassword System.getenv('SB_STORE_PASSWORD') ?: (project.findProperty('sb.storePassword') ?: '')
+                keyAlias System.getenv('SB_KEY_ALIAS') ?: (project.findProperty('sb.keyAlias') ?: 'sb')
+                keyPassword System.getenv('SB_KEY_PASSWORD') ?: (project.findProperty('sb.keyPassword') ?: '')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (sbStore) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
+
+dependencies {
+    // 由 gh workflow 或本地脚本下载到 app/libs/，见 README
+    compileOnly files('libs/xposed-api-82.jar')
+}
