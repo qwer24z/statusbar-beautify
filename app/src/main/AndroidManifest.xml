@@ -23,6 +23,11 @@
             android:name="xposedsharedprefs"
             android:value="true" />
 
+        <provider
+            android:name=".ConfigProvider"
+            android:authorities="com.kuuzan.statusbar.config"
+            android:exported="true" />
+
         <activity
             android:name=".SettingsActivity"
             android:exported="true"
