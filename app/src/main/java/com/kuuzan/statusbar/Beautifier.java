@@ -138,13 +138,19 @@ final class Beautifier {
             Cfg fromProvider = loadFromProvider();
             if (fromProvider != null) {
                 fromProvider.via = "provider";
-                return fromProvider;
+                if (fromProvider.image != null && !fromProvider.image.isEmpty()) {
+                    return fromProvider;
+                }
             }
+            // provider 通了但没图时，再试一次老通道，两条路都走满
             Cfg fromPrefs = loadFromXSharedPrefs();
             if (fromPrefs != null) {
                 fromPrefs.via = "xsharedprefs";
+                if (fromPrefs.image != null && !fromPrefs.image.isEmpty()) {
+                    return fromPrefs;
+                }
             }
-            return fromPrefs;
+            return fromProvider != null ? fromProvider : fromPrefs;
         }
 
         static Cfg loadFromProvider() {

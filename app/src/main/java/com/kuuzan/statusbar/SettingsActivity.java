@@ -38,6 +38,7 @@ public class SettingsActivity extends Activity {
     private Bitmap source;
 
     private ImageView preview;
+    private TextView imageState;
     private CheckBox enabledBox;
     private SeekBar cornerBar;
     private SeekBar dimBar;
@@ -85,6 +86,14 @@ public class SettingsActivity extends Activity {
         prevLp.topMargin = dp(18);
         box.addView(preview, prevLp);
 
+        imageState = new TextView(this);
+        imageState.setTextSize(12);
+        imageState.setAlpha(0.7f);
+        LinearLayout.LayoutParams stLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        stLp.topMargin = dp(6);
+        box.addView(imageState, stLp);
+
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
@@ -110,6 +119,7 @@ public class SettingsActivity extends Activity {
                 source = null;
                 prefs.edit().remove(Prefs.KEY_IMAGE).remove(Prefs.KEY_URI).apply();
                 preview.setImageDrawable(null);
+                updateImageState();
             }
         });
         LinearLayout.LayoutParams clearLp = new LinearLayout.LayoutParams(
@@ -191,6 +201,7 @@ public class SettingsActivity extends Activity {
                 source = null;
             }
         }
+        updateImageState();
         renderPreview();
     }
 
@@ -298,14 +309,28 @@ public class SettingsActivity extends Activity {
         }
     }
 
+    private void updateImageState() {
+        String b64 = prefs.getString(Prefs.KEY_IMAGE, null);
+        if (b64 == null || b64.isEmpty()) {
+            imageState.setText("图片状态：未选择，状态栏会是一层淡蓝");
+        } else {
+            imageState.setText("图片状态：已保存约 " + (b64.length() * 3 / 4 / 1024) + " KB");
+        }
+    }
+
     private void saveImage(Bitmap bm) {
         try {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             bm.compress(Bitmap.CompressFormat.JPEG, 88, out);
             prefs.edit().putString(Prefs.KEY_IMAGE,
                     Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)).apply();
-        } catch (Throwable ignored) {
+            String back = prefs.getString(Prefs.KEY_IMAGE, null);
+            Toast.makeText(this, back == null ? "保存失败"
+                    : "已保存 " + (back.length() * 3 / 4 / 1024) + " KB", Toast.LENGTH_SHORT).show();
+        } catch (Throwable t) {
+            Toast.makeText(this, "保存失败：" + t, Toast.LENGTH_LONG).show();
         }
+        updateImageState();
     }
 
     // ---------------- 杂项 ----------------
