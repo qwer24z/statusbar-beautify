@@ -47,6 +47,7 @@ public class SettingsActivity extends Activity {
     private SeekBar cornerBar;
     private SeekBar dimBar;
     private SeekBar blurBar;
+    private SeekBar headerHeightBar;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -161,6 +162,8 @@ public class SettingsActivity extends Activity {
                 prefs.getInt(Prefs.KEY_DIM, Prefs.DEF_DIM));
         blurBar = addSlider(box, "模糊 %d dp", 25,
                 prefs.getInt(Prefs.KEY_BLUR, Prefs.DEF_BLUR));
+        headerHeightBar = addSlider(box, "标头高度 %d %%", 50,
+                prefs.getInt(Prefs.KEY_HEADER_HEIGHT, Prefs.DEF_HEADER_HEIGHT));
 
         Button restart = new Button(this);
         restart.setText("重启系统界面");
@@ -256,6 +259,8 @@ public class SettingsActivity extends Activity {
                 .putInt(Prefs.KEY_CORNER, cornerBar.getProgress())
                 .putInt(Prefs.KEY_DIM, dimBar.getProgress())
                 .putInt(Prefs.KEY_BLUR, blurBar.getProgress())
+                .putInt(Prefs.KEY_HEADER_HEIGHT, headerHeightBar == null
+                        ? Prefs.DEF_HEADER_HEIGHT : headerHeightBar.getProgress())
                 .apply();
         renderPreview();
     }

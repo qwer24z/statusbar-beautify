@@ -6,9 +6,12 @@ import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import android.os.Environment;
 import android.util.Base64;
 import android.view.Gravity;
@@ -135,6 +138,103 @@ final class Beautifier {
                 paintHeader(header, "tree");
             }
         });
+    }
+
+    /**
+     * 参考 Iconify 的做法：不跟系统抢某个小 View，而是往下钻到整屏容器，
+     * 把图铺在这个容器的 foreground 上（在面板底色之上、图标文字之下），
+     * 只画顶部一条，下面留透明，看起来就是「标头图 + 深色面板」。
+     */
+    static void attachPanel(final View decor) {
+        whenLaidOut(decor, new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Cfg cfg = Cfg.load();
+                    if (cfg == null || !cfg.header) {
+                        return;
+                    }
+                    View panel = deepestFullSize(decor);
+                    if (panel == null) {
+                        Diag.log("没找到整屏容器");
+                        return;
+                    }
+                    int w = panel.getWidth();
+                    int screenH = panel.getResources().getDisplayMetrics().heightPixels;
+                    int pct = Math.max(8, Math.min(60, cfg.headerHeight));
+                    int h = (int) (screenH * pct / 100f);
+                    Bitmap src = loadImage(cfg);
+                    if (src == null) {
+                        Diag.log("标头：没图");
+                        return;
+                    }
+                    Bitmap bmp = RenderUtil.render(src, w, h,
+                            Math.max(0, Math.min(80, cfg.dim)),
+                            Math.round(Math.max(0, cfg.blur) * panel.getResources().getDisplayMetrics().density));
+                    if (bmp == null) {
+                        return;
+                    }
+                    panel.setForeground(new TopImageDrawable(bmp));
+                    Diag.log("标头图铺在 " + panel.getClass().getName()
+                            + " w=" + w + " h=" + h + " pct=" + pct);
+                } catch (Throwable t) {
+                    Diag.log("attachPanel 失败 " + t);
+                }
+            }
+        });
+    }
+
+    private static View deepestFullSize(View v) {
+        View cur = v;
+        while (cur instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) cur;
+            View next = null;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                View c = g.getChildAt(i);
+                if (c.getVisibility() == View.VISIBLE
+                        && c.getWidth() >= cur.getWidth() - 2
+                        && c.getHeight() >= cur.getHeight() - 2) {
+                    next = c;
+                    break;
+                }
+            }
+            if (next == null) {
+                break;
+            }
+            cur = next;
+        }
+        return cur;
+    }
+
+    /** 只画顶部一条的 drawable，其余区域透明，让面板底色透出来 */
+    private static final class TopImageDrawable extends Drawable {
+        private final Bitmap bmp;
+        private final Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
+
+        TopImageDrawable(Bitmap bmp) {
+            this.bmp = bmp;
+        }
+
+        @Override
+        public void draw(Canvas canvas) {
+            Rect b = getBounds();
+            canvas.drawBitmap(bmp, null, new Rect(b.left, b.top, b.left + bmp.getWidth(), b.top + bmp.getHeight()), paint);
+        }
+
+        @Override
+        public void setAlpha(int alpha) {
+            paint.setAlpha(alpha);
+        }
+
+        @Override
+        public void setColorFilter(android.graphics.ColorFilter cf) {
+            paint.setColorFilter(cf);
+        }
+
+        @Override
+        public int getOpacity() {
+            return android.graphics.PixelFormat.TRANSLUCENT;
+        }
     }
 
     /** 用「11月14日 星期六」这类日期文字当锚点，往上爬到标头容器 */
@@ -390,6 +490,7 @@ final class Beautifier {
         int blur = Prefs.DEF_BLUR;
         boolean status = Prefs.DEF_STATUS;
         boolean header = Prefs.DEF_HEADER;
+        int headerHeight = Prefs.DEF_HEADER_HEIGHT;
         String via = "?";
 
         static Cfg load() {
@@ -432,6 +533,7 @@ final class Beautifier {
                     cfg.blur = c.getInt(4);
                     cfg.status = c.getInt(5) != 0;
                     cfg.header = c.getInt(6) != 0;
+                    cfg.headerHeight = c.getInt(7);
                     return cfg;
                 } finally {
                     c.close();
@@ -453,6 +555,7 @@ final class Beautifier {
                 cfg.blur = p.getInt(Prefs.KEY_BLUR, Prefs.DEF_BLUR);
                 cfg.status = p.getBoolean(Prefs.KEY_STATUS, Prefs.DEF_STATUS);
                 cfg.header = p.getBoolean(Prefs.KEY_HEADER, Prefs.DEF_HEADER);
+                cfg.headerHeight = p.getInt(Prefs.KEY_HEADER_HEIGHT, Prefs.DEF_HEADER_HEIGHT);
                 return cfg;
             } catch (Throwable t) {
                 Diag.log("XSharedPreferences 读配置失败 " + t);

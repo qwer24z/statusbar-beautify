@@ -15,12 +15,14 @@ public final class Prefs {
     public static final String KEY_BLUR = "blur";     // dp
     public static final String KEY_STATUS = "status_enabled";
     public static final String KEY_HEADER = "header_enabled";
+    public static final String KEY_HEADER_HEIGHT = "header_height"; // 屏幕高度百分比
 
     public static final int DEF_CORNER = 16;
     public static final int DEF_DIM = 20;
     public static final int DEF_BLUR = 0;
     public static final boolean DEF_STATUS = false;
     public static final boolean DEF_HEADER = true;
+    public static final int DEF_HEADER_HEIGHT = 25;
 
     private Prefs() {
     }
