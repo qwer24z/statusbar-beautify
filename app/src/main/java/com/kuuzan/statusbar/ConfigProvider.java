@@ -3,9 +3,14 @@ package com.kuuzan.statusbar;
 import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.content.SharedPreferences;
+import android.os.Bundle;
 import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * 把模块的配置喂给 SystemUI 进程。
@@ -17,8 +22,44 @@ public class ConfigProvider extends ContentProvider {
     public static final Uri URI = Uri.parse("content://" + AUTHORITY + "/config");
 
     public static final String[] COLUMNS = {
-            "enabled", "image", "corner", "dim", "blur"
+            "enabled", "image", "corner", "dim", "blur", "status", "header"
     };
+
+    /** SystemUI 那边写过来的诊断行，App 进程里读 */
+    private static final List<String> LOGS =
+            Collections.synchronizedList(new ArrayList<String>());
+
+    @Override
+    public Bundle call(String method, String arg, Bundle extras) {
+        if ("log".equals(method)) {
+            String line = extras == null ? null : extras.getString("line");
+            if (line != null) {
+                synchronized (LOGS) {
+                    if (LOGS.size() > 400) {
+                        LOGS.remove(0);
+                    }
+                    LOGS.add(line);
+                }
+            }
+            return null;
+        }
+        if ("dump".equals(method)) {
+            Bundle out = new Bundle();
+            ArrayList<String> copy;
+            synchronized (LOGS) {
+                copy = new ArrayList<>(LOGS);
+            }
+            out.putStringArrayList("lines", copy);
+            return out;
+        }
+        return null;
+    }
+
+    public static List<String> dumpLocal() {
+        synchronized (LOGS) {
+            return new ArrayList<>(LOGS);
+        }
+    }
 
     @Override
     public boolean onCreate() {
@@ -36,6 +77,8 @@ public class ConfigProvider extends ContentProvider {
                 p.getInt(Prefs.KEY_CORNER, Prefs.DEF_CORNER),
                 p.getInt(Prefs.KEY_DIM, Prefs.DEF_DIM),
                 p.getInt(Prefs.KEY_BLUR, Prefs.DEF_BLUR),
+                p.getBoolean(Prefs.KEY_STATUS, Prefs.DEF_STATUS) ? 1 : 0,
+                p.getBoolean(Prefs.KEY_HEADER, Prefs.DEF_HEADER) ? 1 : 0,
         });
         return cursor;
     }

@@ -17,16 +17,35 @@ final class Diag {
     private Diag() {
     }
 
+    private static final java.util.concurrent.atomic.AtomicInteger PUSHED =
+            new java.util.concurrent.atomic.AtomicInteger();
+
     static void log(String msg) {
         try {
             de.robv.android.xposed.XposedBridge.log("SBBeautify: " + msg);
         } catch (Throwable ignored) {
+        }
+        if (PUSHED.getAndIncrement() < 400) {
+            pushToApp(msg);
         }
         synchronized (LOCK) {
             try (FileOutputStream out = new FileOutputStream(logFile(), true)) {
                 out.write((System.currentTimeMillis() + " " + msg + "\n").getBytes());
             } catch (Throwable ignored) {
             }
+        }
+    }
+
+    private static void pushToApp(String msg) {
+        try {
+            android.content.Context ctx = android.app.AndroidAppHelper.currentApplication();
+            if (ctx == null) {
+                return;
+            }
+            android.os.Bundle b = new android.os.Bundle();
+            b.putString("line", msg);
+            ctx.getContentResolver().call(ConfigProvider.URI, "log", null, b);
+        } catch (Throwable ignored) {
         }
     }
 

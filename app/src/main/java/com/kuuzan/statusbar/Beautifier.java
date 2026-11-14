@@ -67,6 +67,10 @@ final class Beautifier {
                 Diag.log("模块被关闭");
                 return;
             }
+            if (cfg != null && !cfg.status) {
+                Diag.log("状态栏开关关闭，跳过");
+                return;
+            }
             Bitmap src = loadImage(cfg);
             if (src == null) {
                 root.setBackground(new BitmapDrawable(root.getResources(), checker(root.getWidth(), root.getHeight())));
@@ -245,6 +249,10 @@ final class Beautifier {
                 Diag.log("标头：模块被关闭");
                 return;
             }
+            if (cfg != null && !cfg.header) {
+                Diag.log("标头：开关关闭，跳过");
+                return;
+            }
             Bitmap src = loadImage(cfg);
             if (src == null) {
                 Diag.log("标头：没图，跳过");
@@ -258,9 +266,19 @@ final class Beautifier {
             }
             BitmapDrawable drawable = new BitmapDrawable(root.getResources(), bmp);
             drawable.setGravity(Gravity.FILL);
-            root.setBackground(drawable);
-            clipRound(root, cornerPx);
-            Diag.log("标头铺图完成(" + how + ") " + root.getWidth() + "x" + root.getHeight());
+            // Iconify 的思路：别跟系统抢 setBackground（会被 ColorOS 的主题逻辑盖掉），
+            // 铺在 foreground 上，画在背景之上、子 View 之下，正好是标头图
+            try {
+                root.setForeground(drawable);
+                clipRound(root, cornerPx);
+                Diag.log("标头铺图完成(" + how + ",foreground) "
+                        + root.getWidth() + "x" + root.getHeight());
+            } catch (Throwable t) {
+                root.setBackground(drawable);
+                clipRound(root, cornerPx);
+                Diag.log("标头铺图完成(" + how + ",background) "
+                        + root.getWidth() + "x" + root.getHeight());
+            }
         } catch (Throwable t) {
             Diag.log("标头 install 失败 " + t);
         }
@@ -370,6 +388,8 @@ final class Beautifier {
         int corner = Prefs.DEF_CORNER;
         int dim = Prefs.DEF_DIM;
         int blur = Prefs.DEF_BLUR;
+        boolean status = Prefs.DEF_STATUS;
+        boolean header = Prefs.DEF_HEADER;
         String via = "?";
 
         static Cfg load() {
@@ -410,6 +430,8 @@ final class Beautifier {
                     cfg.corner = c.getInt(2);
                     cfg.dim = c.getInt(3);
                     cfg.blur = c.getInt(4);
+                    cfg.status = c.getInt(5) != 0;
+                    cfg.header = c.getInt(6) != 0;
                     return cfg;
                 } finally {
                     c.close();
@@ -429,6 +451,8 @@ final class Beautifier {
                 cfg.corner = p.getInt(Prefs.KEY_CORNER, Prefs.DEF_CORNER);
                 cfg.dim = p.getInt(Prefs.KEY_DIM, Prefs.DEF_DIM);
                 cfg.blur = p.getInt(Prefs.KEY_BLUR, Prefs.DEF_BLUR);
+                cfg.status = p.getBoolean(Prefs.KEY_STATUS, Prefs.DEF_STATUS);
+                cfg.header = p.getBoolean(Prefs.KEY_HEADER, Prefs.DEF_HEADER);
                 return cfg;
             } catch (Throwable t) {
                 Diag.log("XSharedPreferences 读配置失败 " + t);

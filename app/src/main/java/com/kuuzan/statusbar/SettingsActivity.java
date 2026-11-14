@@ -1,6 +1,7 @@
 package com.kuuzan.statusbar;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
@@ -140,6 +141,20 @@ public class SettingsActivity extends Activity {
         enLp.topMargin = dp(16);
         box.addView(enabledBox, enLp);
 
+        CheckBox statusBox = new CheckBox(this);
+        statusBox.setText("铺在状态栏");
+        statusBox.setChecked(prefs.getBoolean(Prefs.KEY_STATUS, Prefs.DEF_STATUS));
+        statusBox.setOnCheckedChangeListener((btn, checked) ->
+                prefs.edit().putBoolean(Prefs.KEY_STATUS, checked).apply());
+        box.addView(statusBox);
+
+        CheckBox headerBox = new CheckBox(this);
+        headerBox.setText("铺在控制中心标头");
+        headerBox.setChecked(prefs.getBoolean(Prefs.KEY_HEADER, Prefs.DEF_HEADER));
+        headerBox.setOnCheckedChangeListener((btn, checked) ->
+                prefs.edit().putBoolean(Prefs.KEY_HEADER, checked).apply());
+        box.addView(headerBox);
+
         cornerBar = addSlider(box, "圆角 %d dp", 40,
                 prefs.getInt(Prefs.KEY_CORNER, Prefs.DEF_CORNER));
         dimBar = addSlider(box, "暗化 %d %%", 80,
@@ -159,6 +174,19 @@ public class SettingsActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         restartLp.topMargin = dp(20);
         box.addView(restart, restartLp);
+
+        Button diagBtn = new Button(this);
+        diagBtn.setText("查看诊断");
+        diagBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showDiag();
+            }
+        });
+        LinearLayout.LayoutParams diagLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        diagLp.topMargin = dp(8);
+        box.addView(diagBtn, diagLp);
 
         TextView hint = new TextView(this);
         hint.setText("点上面的按钮就能重启系统界面（会向本 App 要 root 权限）。"
@@ -387,6 +415,37 @@ public class SettingsActivity extends Activity {
     }
 
     // ---------------- 杂项 ----------------
+
+    private void showDiag() {
+        StringBuilder sb = new StringBuilder();
+        try {
+            android.os.Bundle b = getContentResolver().call(ConfigProvider.URI, "dump", null, null);
+            java.util.List<String> lines = b == null ? null : b.getStringArrayList("lines");
+            if (lines == null || lines.isEmpty()) {
+                sb.append("还没有记录。先下拉一次控制中心，再点这里。");
+            } else {
+                int from = Math.max(0, lines.size() - 100);
+                sb.append("共 ").append(lines.size()).append(" 行\n\n");
+                for (int i = from; i < lines.size(); i++) {
+                    sb.append(lines.get(i)).append('\n');
+                }
+            }
+        } catch (Throwable t) {
+            sb.append("读诊断失败：").append(t);
+        }
+        TextView tv = new TextView(this);
+        tv.setText(sb.toString());
+        tv.setTextSize(11);
+        tv.setPadding(dp(16), dp(12), dp(16), dp(12));
+        tv.setTextIsSelectable(true);
+        ScrollView sv = new ScrollView(this);
+        sv.addView(tv);
+        new AlertDialog.Builder(this)
+                .setTitle("SBBeautify 诊断")
+                .setView(sv)
+                .setPositiveButton("关闭", null)
+                .show();
+    }
 
     private void restartSystemUi() {
         Toast.makeText(this, "正在发送重启指令", Toast.LENGTH_SHORT).show();
