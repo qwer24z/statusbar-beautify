@@ -13,6 +13,7 @@ import android.os.Environment;
 import android.util.Base64;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
 
 import java.io.File;
@@ -23,9 +24,11 @@ import java.util.WeakHashMap;
 import de.robv.android.xposed.XSharedPreferences;
 
 /**
- * 跑在 com.android.systemui 进程里，把图铺成状态栏那层 View 的背景。
- * 图片三条路：media 目录里 App 存的文件 → ContentProvider 的 Base64 → XSharedPreferences。
- * 一条都拿不到就画品红/青棋盘格，这个颜色不会被误认成系统主题色。
+ * 两个地方铺图：
+ *  1) 状态栏那层 View（窗口级 DecorView / 类名层命中的 View）
+ *  2) 控制中心顶部的标头
+ * 标头三种找法：类名 QuickStatusBarHeader、LayoutInflater 造出来的同名 View、
+ * 从下拉窗口里按 qs_carrier_text 往上爬到标头容器。
  */
 final class Beautifier {
 
@@ -34,9 +37,12 @@ final class Beautifier {
 
     private static final Set<View> DONE = Collections.newSetFromMap(new WeakHashMap<View, Boolean>());
     private static final Set<View> DONE_HEADER = Collections.newSetFromMap(new WeakHashMap<View, Boolean>());
+    private static final Set<View> DONE_SHADE = Collections.newSetFromMap(new WeakHashMap<View, Boolean>());
 
     private Beautifier() {
     }
+
+    // ---------------- 状态栏 ----------------
 
     static void attach(final View root) {
         if (root == null || DONE.contains(root)) {
@@ -44,23 +50,15 @@ final class Beautifier {
         }
         DONE.add(root);
         Diag.log("attach " + root.getClass().getName() + " " + root.getWidth() + "x" + root.getHeight());
-        if (root.getWidth() > 0 && root.getHeight() > 0) {
-            install(root);
-            return;
-        }
-        root.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+        whenLaidOut(root, new Runnable() {
             @Override
-            public void onLayoutChange(View v, int left, int top, int right, int bottom,
-                                       int oldLeft, int oldTop, int oldRight, int oldBottom) {
-                if (v.getWidth() > 0 && v.getHeight() > 0) {
-                    v.removeOnLayoutChangeListener(this);
-                    install(v);
-                }
+            public void run() {
+                paintStatusBar(root);
             }
         });
     }
 
-    private static void install(View root) {
+    private static void paintStatusBar(View root) {
         try {
             Cfg cfg = Cfg.load();
             if (cfg != null && !cfg.enabled) {
@@ -74,42 +72,25 @@ final class Beautifier {
                 Diag.log("拿不到图，画棋盘格");
                 return;
             }
-            int dim = cfg == null ? 0 : Math.max(0, Math.min(80, cfg.dim));
-            int blurPx = cfg == null ? 0
-                    : Math.round(Math.max(0, cfg.blur) * Resources.getSystem().getDisplayMetrics().density);
             int cornerPx = cfg == null ? 0
                     : Math.round(Math.max(0, cfg.corner) * Resources.getSystem().getDisplayMetrics().density);
-
-            Bitmap bmp = RenderUtil.render(src, root.getWidth(), root.getHeight(), dim, blurPx);
+            Bitmap bmp = renderFor(src, root, cfg);
             if (bmp == null) {
                 return;
             }
             BitmapDrawable drawable = new BitmapDrawable(root.getResources(), bmp);
             drawable.setGravity(Gravity.FILL);
             root.setBackground(drawable);
-
-            if (cornerPx > 0) {
-                final int corner = cornerPx;
-                root.setOutlineProvider(new ViewOutlineProvider() {
-                    @Override
-                    public void getOutline(View v, Outline outline) {
-                        float r = Math.min(corner, Math.min(v.getWidth(), v.getHeight()) / 2f);
-                        outline.setRoundRect(0, 0, v.getWidth(), v.getHeight(), r);
-                    }
-                });
-                root.setClipToOutline(true);
-                root.invalidateOutline();
-            } else {
-                root.setClipToOutline(false);
-            }
-            Diag.log("铺图完成 " + root.getWidth() + "x" + root.getHeight()
-                    + " from=" + imageFrom);
+            clipRound(root, cornerPx);
+            Diag.log("状态栏铺图完成 " + root.getWidth() + "x" + root.getHeight() + " from=" + imageFrom);
         } catch (Throwable t) {
-            Diag.log("install 失败 " + t);
+            Diag.log("状态栏 install 失败 " + t);
         }
     }
 
-    /** 控制中心顶部的标头（OplusQuickStatusBarHeader 之类），把图铺在它背后 */
+    // ---------------- 标头 ----------------
+
+    /** 类名 / LayoutInflater 命中的标头 View */
     static void attachHeader(final View root) {
         if (root == null || DONE_HEADER.contains(root)) {
             return;
@@ -117,23 +98,74 @@ final class Beautifier {
         DONE_HEADER.add(root);
         Diag.log("标头 attach " + root.getClass().getName()
                 + " " + root.getWidth() + "x" + root.getHeight());
-        if (root.getWidth() > 0 && root.getHeight() > 0) {
-            installHeader(root);
-            return;
-        }
-        root.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+        whenLaidOut(root, new Runnable() {
             @Override
-            public void onLayoutChange(View v, int left, int top, int right, int bottom,
-                                       int oldLeft, int oldTop, int oldRight, int oldBottom) {
-                if (v.getWidth() > 0 && v.getHeight() > 0) {
-                    v.removeOnLayoutChangeListener(this);
-                    installHeader(v);
-                }
+            public void run() {
+                paintHeader(root, "class");
             }
         });
     }
 
-    private static void installHeader(View root) {
+    /** 下拉窗口整棵树，按资源 id 爬上去找标头 */
+    static void attachShade(final View decor) {
+        if (decor == null || DONE_SHADE.contains(decor)) {
+            return;
+        }
+        DONE_SHADE.add(decor);
+        Diag.log("下拉窗口 attach " + decor.getClass().getName());
+        whenLaidOut(decor, new Runnable() {
+            @Override
+            public void run() {
+                View header = findHeaderByTree(decor);
+                if (header == null) {
+                    Diag.log("下拉树里没找到标头");
+                    return;
+                }
+                Diag.log("下拉树命中标头 " + header.getClass().getName()
+                        + " " + header.getWidth() + "x" + header.getHeight());
+                paintHeader(header, "tree");
+            }
+        });
+    }
+
+    private static View findHeaderByTree(View decor) {
+        try {
+            Resources res = decor.getResources();
+            String[] ids = {"qs_carrier_text", "quick_settings_header", "qs_header", "header_clock"};
+            for (String name : ids) {
+                int id = res.getIdentifier(name, "id", "com.android.systemui");
+                if (id == 0) {
+                    continue;
+                }
+                View anchor = decor.findViewById(id);
+                if (anchor == null) {
+                    continue;
+                }
+                int decorW = decor.getWidth();
+                int screenH = res.getDisplayMetrics().heightPixels;
+                int maxH = (int) (screenH * 0.5f);
+                View best = null;
+                View cur = anchor;
+                while (cur != null && cur != decor) {
+                    if (cur.getWidth() >= decorW * 0.9f && cur.getHeight() > 0 && cur.getHeight() <= maxH) {
+                        best = cur;
+                    }
+                    if (!(cur.getParent() instanceof View)) {
+                        break;
+                    }
+                    cur = (View) cur.getParent();
+                }
+                if (best != null) {
+                    return best;
+                }
+            }
+        } catch (Throwable t) {
+            Diag.log("找标头出错 " + t);
+        }
+        return null;
+    }
+
+    private static void paintHeader(View root, String how) {
         try {
             Cfg cfg = Cfg.load();
             if (cfg != null && !cfg.enabled) {
@@ -142,36 +174,65 @@ final class Beautifier {
             }
             Bitmap src = loadImage(cfg);
             if (src == null) {
-                Diag.log("标头：拿不到图，跳过");
+                Diag.log("标头：没图，跳过");
                 return;
             }
-            int dim = cfg == null ? 0 : Math.max(0, Math.min(80, cfg.dim));
-            int blurPx = cfg == null ? 0
-                    : Math.round(Math.max(0, cfg.blur) * Resources.getSystem().getDisplayMetrics().density);
             int cornerDp = cfg == null ? 24 : Math.max(24, cfg.corner);
-            final int cornerPx = Math.round(cornerDp * Resources.getSystem().getDisplayMetrics().density);
-
-            Bitmap bmp = RenderUtil.render(src, root.getWidth(), root.getHeight(), dim, blurPx);
+            int cornerPx = Math.round(cornerDp * Resources.getSystem().getDisplayMetrics().density);
+            Bitmap bmp = renderFor(src, root, cfg);
             if (bmp == null) {
                 return;
             }
             BitmapDrawable drawable = new BitmapDrawable(root.getResources(), bmp);
             drawable.setGravity(Gravity.FILL);
             root.setBackground(drawable);
-            root.setOutlineProvider(new ViewOutlineProvider() {
-                @Override
-                public void getOutline(View v, Outline outline) {
-                    float r = Math.min(cornerPx, Math.min(v.getWidth(), v.getHeight()) / 2f);
-                    outline.setRoundRect(0, 0, v.getWidth(), v.getHeight(), r);
-                }
-            });
-            root.setClipToOutline(true);
-            root.invalidateOutline();
-            Diag.log("标头铺图完成 " + root.getWidth() + "x" + root.getHeight()
-                    + " corner=" + cornerPx);
+            clipRound(root, cornerPx);
+            Diag.log("标头铺图完成(" + how + ") " + root.getWidth() + "x" + root.getHeight());
         } catch (Throwable t) {
             Diag.log("标头 install 失败 " + t);
         }
+    }
+
+    // ---------------- 公共 ----------------
+
+    private static void whenLaidOut(final View v, final Runnable action) {
+        if (v.getWidth() > 0 && v.getHeight() > 0) {
+            action.run();
+            return;
+        }
+        v.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+            @Override
+            public void onLayoutChange(View view, int left, int top, int right, int bottom,
+                                       int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                if (view.getWidth() > 0 && view.getHeight() > 0) {
+                    view.removeOnLayoutChangeListener(this);
+                    action.run();
+                }
+            }
+        });
+    }
+
+    private static Bitmap renderFor(Bitmap src, View root, Cfg cfg) {
+        int dim = cfg == null ? 0 : Math.max(0, Math.min(80, cfg.dim));
+        int blurPx = cfg == null ? 0
+                : Math.round(Math.max(0, cfg.blur) * Resources.getSystem().getDisplayMetrics().density);
+        return RenderUtil.render(src, root.getWidth(), root.getHeight(), dim, blurPx);
+    }
+
+    private static void clipRound(View root, final int cornerPx) {
+        if (cornerPx <= 0) {
+            root.setClipToOutline(false);
+            return;
+        }
+        root.setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View v, Outline outline) {
+                float r = Math.min(cornerPx, Math.min(v.getWidth(), v.getHeight()) / 2f);
+                outline.setRoundRect(0, 0, v.getWidth(), v.getHeight(), r);
+            }
+        });
+        root.setClipToOutline(true);
+        root.invalidateOutline();
     }
 
     private static String imageFrom = "?";
@@ -180,7 +241,6 @@ final class Beautifier {
         Bitmap file = loadFromMedia();
         if (file != null) {
             imageFrom = "media-file";
-            Diag.log("用 media 文件里的图 " + file.getWidth() + "x" + file.getHeight());
             return file;
         }
         if (cfg != null && cfg.image != null && !cfg.image.isEmpty()) {
@@ -189,7 +249,6 @@ final class Beautifier {
                 Bitmap bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
                 if (bmp != null) {
                     imageFrom = "config(" + cfg.via + ")";
-                    Diag.log("用配置里的图 " + bmp.getWidth() + "x" + bmp.getHeight());
                     return bmp;
                 }
             } catch (Throwable t) {
@@ -262,7 +321,6 @@ final class Beautifier {
             try {
                 Context ctx = android.app.AndroidAppHelper.currentApplication();
                 if (ctx == null) {
-                    Diag.log("provider: 拿不到 SystemUI 的 Context");
                     return null;
                 }
                 Cursor c = ctx.getContentResolver().query(ConfigProvider.URI, null, null, null, null);

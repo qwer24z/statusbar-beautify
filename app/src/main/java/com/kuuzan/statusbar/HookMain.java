@@ -22,6 +22,8 @@ public class HookMain implements IXposedHookLoadPackage {
 
     private static final String TAG = "SBBeautify";
     private static final String SYSTEMUI = "com.android.systemui";
+    /** WindowManager.LayoutParams.TYPE_NOTIFICATION_SHADE，某些 SDK 里没这个常量 */
+    private static final int TYPE_NOTIFICATION_SHADE = 2040;
 
     private static final String[] CLASSES = {
             "com.android.systemui.statusbar.phone.CollapsedStatusBarFragment",
@@ -45,6 +47,7 @@ public class HookMain implements IXposedHookLoadPackage {
         hookStatusBarWindow(lp.classLoader);
         hookViewRoot(lp.classLoader);
         hookQsHeader(lp.classLoader);
+        hookLayoutInflater(lp.classLoader);
         for (String cls : CLASSES) {
             for (String method : METHODS) {
                 hook(lp.classLoader, cls, method);
@@ -110,13 +113,17 @@ public class HookMain implements IXposedHookLoadPackage {
                     if (!(raw instanceof WindowManager.LayoutParams)) {
                         return;
                     }
-                    if (((WindowManager.LayoutParams) raw).type != WindowManager.LayoutParams.TYPE_STATUS_BAR) {
+                    int type = ((WindowManager.LayoutParams) raw).type;
+                    Object view = param.args[0];
+                    if (!(view instanceof View)) {
                         return;
                     }
-                    Object view = param.args[0];
-                    if (view instanceof View) {
+                    if (type == WindowManager.LayoutParams.TYPE_STATUS_BAR) {
                         Diag.log("ViewRootImpl.setView 命中状态栏窗口");
                         Beautifier.attach((View) view);
+                    } else if (type == TYPE_NOTIFICATION_SHADE) {
+                        Diag.log("ViewRootImpl.setView 命中下拉窗口");
+                        Beautifier.attachShade((View) view);
                     }
                 }
             });
@@ -145,6 +152,29 @@ public class HookMain implements IXposedHookLoadPackage {
             });
         } catch (Throwable t) {
             Diag.log("QS 标头钩子挂不上 " + t);
+        }
+    }
+
+    /** 兜底：标头可能是 LayoutInflater 按名字造出来的，直接认类名 */
+    private static void hookLayoutInflater(ClassLoader cl) {
+        try {
+            Class<?> inflater = XposedHelpers.findClass("android.view.LayoutInflater", cl);
+            XposedBridge.hookAllMethods(inflater, "createView", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    Object result = param.getResult();
+                    if (!(result instanceof View)) {
+                        return;
+                    }
+                    String name = result.getClass().getName();
+                    if (name.contains("QuickStatusBarHeader") || name.contains("SimpleHeader")) {
+                        Diag.log("Inflater 造出标头 " + name);
+                        Beautifier.attachHeader((View) result);
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            Diag.log("LayoutInflater 兜底挂不上 " + t);
         }
     }
 
