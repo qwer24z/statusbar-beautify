@@ -44,6 +44,7 @@ public class HookMain implements IXposedHookLoadPackage {
         hookSystemUiApp(lp.classLoader);
         hookStatusBarWindow(lp.classLoader);
         hookViewRoot(lp.classLoader);
+        hookQsHeader(lp.classLoader);
         for (String cls : CLASSES) {
             for (String method : METHODS) {
                 hook(lp.classLoader, cls, method);
@@ -121,6 +122,29 @@ public class HookMain implements IXposedHookLoadPackage {
             });
         } catch (Throwable t) {
             Diag.log("ViewRootImpl 兜底挂不上 " + t);
+        }
+    }
+
+    /** 控制中心标头：ColorOS 是 com.oplus.systemui.qs.OplusQuickStatusBarHeader，兜底认类名含 QuickStatusBarHeader 的 View */
+    private static void hookQsHeader(ClassLoader cl) {
+        try {
+            Class<?> viewClass = XposedHelpers.findClass("android.view.View", cl);
+            XposedBridge.hookAllMethods(viewClass, "onFinishInflate", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    Object raw = param.thisObject;
+                    if (!(raw instanceof View)) {
+                        return;
+                    }
+                    String name = raw.getClass().getName();
+                    if (name.contains("QuickStatusBarHeader")) {
+                        Diag.log("QS 标头命中 " + name);
+                        Beautifier.attachHeader((View) raw);
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            Diag.log("QS 标头钩子挂不上 " + t);
         }
     }
 

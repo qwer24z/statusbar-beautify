@@ -33,6 +33,7 @@ final class Beautifier {
     private static final String MEDIA_IMAGE = "statusbar.jpg";
 
     private static final Set<View> DONE = Collections.newSetFromMap(new WeakHashMap<View, Boolean>());
+    private static final Set<View> DONE_HEADER = Collections.newSetFromMap(new WeakHashMap<View, Boolean>());
 
     private Beautifier() {
     }
@@ -105,6 +106,71 @@ final class Beautifier {
                     + " from=" + imageFrom);
         } catch (Throwable t) {
             Diag.log("install 失败 " + t);
+        }
+    }
+
+    /** 控制中心顶部的标头（OplusQuickStatusBarHeader 之类），把图铺在它背后 */
+    static void attachHeader(final View root) {
+        if (root == null || DONE_HEADER.contains(root)) {
+            return;
+        }
+        DONE_HEADER.add(root);
+        Diag.log("标头 attach " + root.getClass().getName()
+                + " " + root.getWidth() + "x" + root.getHeight());
+        if (root.getWidth() > 0 && root.getHeight() > 0) {
+            installHeader(root);
+            return;
+        }
+        root.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+            @Override
+            public void onLayoutChange(View v, int left, int top, int right, int bottom,
+                                       int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                if (v.getWidth() > 0 && v.getHeight() > 0) {
+                    v.removeOnLayoutChangeListener(this);
+                    installHeader(v);
+                }
+            }
+        });
+    }
+
+    private static void installHeader(View root) {
+        try {
+            Cfg cfg = Cfg.load();
+            if (cfg != null && !cfg.enabled) {
+                Diag.log("标头：模块被关闭");
+                return;
+            }
+            Bitmap src = loadImage(cfg);
+            if (src == null) {
+                Diag.log("标头：拿不到图，跳过");
+                return;
+            }
+            int dim = cfg == null ? 0 : Math.max(0, Math.min(80, cfg.dim));
+            int blurPx = cfg == null ? 0
+                    : Math.round(Math.max(0, cfg.blur) * Resources.getSystem().getDisplayMetrics().density);
+            int cornerDp = cfg == null ? 24 : Math.max(24, cfg.corner);
+            final int cornerPx = Math.round(cornerDp * Resources.getSystem().getDisplayMetrics().density);
+
+            Bitmap bmp = RenderUtil.render(src, root.getWidth(), root.getHeight(), dim, blurPx);
+            if (bmp == null) {
+                return;
+            }
+            BitmapDrawable drawable = new BitmapDrawable(root.getResources(), bmp);
+            drawable.setGravity(Gravity.FILL);
+            root.setBackground(drawable);
+            root.setOutlineProvider(new ViewOutlineProvider() {
+                @Override
+                public void getOutline(View v, Outline outline) {
+                    float r = Math.min(cornerPx, Math.min(v.getWidth(), v.getHeight()) / 2f);
+                    outline.setRoundRect(0, 0, v.getWidth(), v.getHeight(), r);
+                }
+            });
+            root.setClipToOutline(true);
+            root.invalidateOutline();
+            Diag.log("标头铺图完成 " + root.getWidth() + "x" + root.getHeight()
+                    + " corner=" + cornerPx);
+        } catch (Throwable t) {
+            Diag.log("标头 install 失败 " + t);
         }
     }
 
