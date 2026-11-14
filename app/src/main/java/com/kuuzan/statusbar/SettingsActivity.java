@@ -147,8 +147,22 @@ public class SettingsActivity extends Activity {
         blurBar = addSlider(box, "模糊 %d dp", 25,
                 prefs.getInt(Prefs.KEY_BLUR, Prefs.DEF_BLUR));
 
+        Button restart = new Button(this);
+        restart.setText("重启系统界面");
+        restart.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                restartSystemUi();
+            }
+        });
+        LinearLayout.LayoutParams restartLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        restartLp.topMargin = dp(20);
+        box.addView(restart, restartLp);
+
         TextView hint = new TextView(this);
-        hint.setText("改完去 LSPosed 里勾上作用域「系统界面」，再重启系统界面或重启手机才生效。"
+        hint.setText("点上面的按钮就能重启系统界面（会向本 App 要 root 权限）。"
+                + "改完去 LSPosed 里勾上作用域「系统界面」，再重启才生效。"
                 + "AOSP / 类原生直接能用；ColorOS 这种改了类名的走窗口级兜底，不确定时看 LSPosed 日志里 SBBeautify 的命中记录。");
         hint.setTextSize(12);
         hint.setAlpha(0.55f);
@@ -373,6 +387,41 @@ public class SettingsActivity extends Activity {
     }
 
     // ---------------- 杂项 ----------------
+
+    private void restartSystemUi() {
+        Toast.makeText(this, "正在发送重启指令", Toast.LENGTH_SHORT).show();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final String err = runAsRoot("pkill -f com.android.systemui || killall com.android.systemui");
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        Toast.makeText(SettingsActivity.this,
+                                err == null ? "已发送，屏幕闪一下是正常的"
+                                        : "失败：" + err, Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private String runAsRoot(String cmd) {
+        try {
+            Process p = new ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start();
+            java.io.BufferedReader r = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(p.getInputStream()));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = r.readLine()) != null) {
+                sb.append(line).append('\n');
+            }
+            p.waitFor();
+            return sb.toString().trim().isEmpty() ? null : sb.toString();
+        } catch (Throwable t) {
+            return String.valueOf(t);
+        }
+    }
 
     private int statusBarHeight() {
         int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
