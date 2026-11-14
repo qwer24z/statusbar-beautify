@@ -6,5 +6,6 @@ local.properties
 *.iml
 app/libs/*.jar
 *.jks
+!app/dev-key.jks
 captures/
 .DS_Store

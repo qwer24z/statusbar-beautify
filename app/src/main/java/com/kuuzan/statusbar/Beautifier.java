@@ -15,8 +15,10 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
+import android.widget.TextView;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Set;
 import java.util.WeakHashMap;
@@ -116,7 +118,10 @@ final class Beautifier {
         whenLaidOut(decor, new Runnable() {
             @Override
             public void run() {
-                View header = findHeaderByTree(decor);
+                View header = findHeaderByText(decor);
+                if (header == null) {
+                    header = findHeaderByTree(decor);
+                }
                 if (header == null) {
                     Diag.log("下拉树里没找到标头");
                     return;
@@ -126,6 +131,74 @@ final class Beautifier {
                 paintHeader(header, "tree");
             }
         });
+    }
+
+    /** 用「11月14日 星期六」这类日期文字当锚点，往上爬到标头容器 */
+    private static View findHeaderByText(View decor) {
+        try {
+            ArrayList<View> all = new ArrayList<>();
+            collectViews(decor, all);
+            Diag.log("下拉树共 " + all.size() + " 个 View");
+            for (View v : all) {
+                if (!(v instanceof TextView) || v.getVisibility() != View.VISIBLE) {
+                    continue;
+                }
+                CharSequence cs = ((TextView) v).getText();
+                if (cs == null) {
+                    continue;
+                }
+                String text = cs.toString().trim();
+                boolean looksLikeDate = text.matches(".*\\d{1,2}月\\d{1,2}日.*") || text.contains("星期");
+                if (!looksLikeDate) {
+                    continue;
+                }
+                Diag.log("日期锚点: " + text);
+                return climbToHeader(decor, v);
+            }
+        } catch (Throwable t) {
+            Diag.log("文字找标头出错 " + t);
+        }
+        return null;
+    }
+
+    private static void collectViews(View v, ArrayList<View> out) {
+        out.add(v);
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                collectViews(g.getChildAt(i), out);
+            }
+        }
+    }
+
+    private static View climbToHeader(View decor, View anchor) {
+        int decorW = decor.getWidth();
+        int screenH = decor.getResources().getDisplayMetrics().heightPixels;
+        int maxH = (int) (screenH * 0.45f);
+        int minH = (int) (screenH * 0.15f);
+        View best = null;
+        View cur = anchor;
+        View lastUnderLimit = null;
+        while (cur != null && cur != decor) {
+            int h = cur.getHeight();
+            if (cur.getWidth() >= decorW * 0.85f && h > 0) {
+                if (h <= maxH) {
+                    lastUnderLimit = cur;
+                } else {
+                    break;
+                }
+            }
+            if (!(cur.getParent() instanceof View)) {
+                break;
+            }
+            cur = (View) cur.getParent();
+        }
+        if (lastUnderLimit != null && lastUnderLimit.getHeight() >= minH) {
+            best = lastUnderLimit;
+        } else {
+            best = lastUnderLimit;
+        }
+        return best;
     }
 
     private static View findHeaderByTree(View decor) {

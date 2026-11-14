@@ -36,16 +36,21 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: 生成签名
+      - name: 准备签名
         run: |
-          keytool -genkeypair -v -keystore release.jks -alias sb \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass statusbar -keypass statusbar \
-            -dname "CN=StatusBarBeautify, OU=dev, O=dev, L=CN, C=CN"
+          set -e
+          if [ -f app/dev-key.jks ]; then
+            echo "使用仓库固定签名 app/dev-key.jks（升级可以覆盖安装）"
+          else
+            keytool -genkeypair -v -keystore app/dev-key.jks -alias sb \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass statusbar -keypass statusbar \
+              -dname "CN=StatusBarBeautify, OU=dev, O=dev, L=CN, C=CN"
+          fi
 
       - name: 编译 release
         env:
-          SB_STORE_FILE: release.jks
+          SB_STORE_FILE: app/dev-key.jks
           SB_STORE_PASSWORD: statusbar
           SB_KEY_ALIAS: sb
           SB_KEY_PASSWORD: statusbar
