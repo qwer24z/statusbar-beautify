@@ -46,8 +46,9 @@ public class HookMain implements IXposedHookLoadPackage {
         hookSystemUiApp(lp.classLoader);
         hookStatusBarWindow(lp.classLoader);
         hookViewRoot(lp.classLoader);
-        hookQsHeader(lp.classLoader);
-        hookLayoutInflater(lp.classLoader);
+        // 标头小 View 这两条路会让图铺到 1160x2800 这种整屏容器上，先停用
+        // hookQsHeader(lp.classLoader);
+        // hookLayoutInflater(lp.classLoader);
         for (String cls : CLASSES) {
             for (String method : METHODS) {
                 hook(lp.classLoader, cls, method);

@@ -154,46 +154,78 @@ final class Beautifier {
                     if (cfg == null || !cfg.header) {
                         return;
                     }
-                    View panel = deepestFullSize(decor);
-                    if (panel == null) {
-                        Diag.log("没找到整屏容器");
-                        return;
+                    java.util.List<View> chain = new java.util.ArrayList<>();
+                    View panel = decor;
+                    chain.add(panel);
+                    View deeper = deepestFullSize(decor);
+                    if (deeper != null && deeper != decor) {
+                        // 把从 decor 到最深容器的每一层都收集起来
+                        View cur = decor;
+                        while (cur != null) {
+                            chain.add(cur);
+                            if (cur == deeper) {
+                                break;
+                            }
+                            cur = nextFullSizeChild(cur);
+                        }
                     }
-                    int w = panel.getWidth();
-                    int screenH = panel.getResources().getDisplayMetrics().heightPixels;
-                    int pct = Math.max(8, Math.min(60, cfg.headerHeight));
-                    int h = (int) (screenH * pct / 100f);
                     Bitmap src = loadImage(cfg);
                     if (src == null) {
                         Diag.log("标头：没图");
                         return;
                     }
-                    Bitmap bmp = RenderUtil.render(src, w, h,
-                            Math.max(0, Math.min(80, cfg.dim)),
-                            Math.round(Math.max(0, cfg.blur) * panel.getResources().getDisplayMetrics().density));
-                    if (bmp == null) {
-                        return;
-                    }
-                    final TopImageDrawable fg = new TopImageDrawable(bmp);
-                    panel.setForeground(fg);
-                    Diag.log("标头图铺在 " + panel.getClass().getName()
-                            + " w=" + w + " h=" + h + " pct=" + pct);
-                    final View again = panel;
-                    panel.postDelayed(new Runnable() {
-                        @Override
-                        public void run() {
-                            try {
-                                again.setForeground(fg);
-                                Diag.log("标头图二次下发");
-                            } catch (Throwable ignored) {
-                            }
+                    int pct = Math.max(8, Math.min(60, cfg.headerHeight));
+                    for (View target : chain) {
+                        int w = target.getWidth();
+                        int hgt = target.getHeight();
+                        if (w <= 0 || hgt <= 0) {
+                            continue;
                         }
-                    }, 1200);
+                        int h = (int) (target.getResources().getDisplayMetrics().heightPixels * pct / 100f);
+                        Bitmap bmp = RenderUtil.render(src, w, h,
+                                Math.max(0, Math.min(80, cfg.dim)),
+                                Math.round(Math.max(0, cfg.blur) * target.getResources().getDisplayMetrics().density));
+                        if (bmp == null) {
+                            continue;
+                        }
+                        final TopImageDrawable fg = new TopImageDrawable(bmp);
+                        target.setForeground(fg);
+                        Diag.log("标头图铺在 " + target.getClass().getName()
+                                + " w=" + w + " h=" + h + " pct=" + pct);
+                        final View again = target;
+                        target.postDelayed(new Runnable() {
+                            @Override
+                            public void run() {
+                                try {
+                                    again.setForeground(fg);
+                                } catch (Throwable ignored) {
+                                }
+                            }
+                        }, 1200);
+                    }
                 } catch (Throwable t) {
                     Diag.log("attachPanel 失败 " + t);
                 }
             }
         });
+    }
+
+    private static View nextFullSizeChild(View cur) {
+        if (!(cur instanceof ViewGroup)) {
+            return null;
+        }
+        ViewGroup g = (ViewGroup) cur;
+        for (int i = 0; i < g.getChildCount(); i++) {
+            View c = g.getChildAt(i);
+            if (c.getVisibility() == View.VISIBLE
+                    && c.getWidth() >= cur.getWidth() - 2
+                    && c.getHeight() >= cur.getHeight() - 2
+                    && c instanceof ViewGroup
+                    && ((ViewGroup) c).getChildCount() > 0) {
+                return c;
+            }
+        }
+        return null;
     }
 
     private static View deepestFullSize(View v) {
