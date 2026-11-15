@@ -8,7 +8,11 @@ import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Outline;
+import android.graphics.LinearGradient;
 import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
+import android.graphics.Shader;
 import android.graphics.Rect;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
@@ -154,21 +158,10 @@ final class Beautifier {
                     if (cfg == null || !cfg.header) {
                         return;
                     }
+                    // 只铺最深那层容器：时间日期是它的子 View，会画在图上面
                     java.util.List<View> chain = new java.util.ArrayList<>();
-                    View panel = decor;
-                    chain.add(panel);
                     View deeper = deepestFullSize(decor);
-                    if (deeper != null && deeper != decor) {
-                        // 把从 decor 到最深容器的每一层都收集起来
-                        View cur = decor;
-                        while (cur != null) {
-                            chain.add(cur);
-                            if (cur == deeper) {
-                                break;
-                            }
-                            cur = nextFullSizeChild(cur);
-                        }
-                    }
+                    chain.add(deeper != null ? deeper : decor);
                     Bitmap src = loadImage(cfg);
                     if (src == null) {
                         Diag.log("标头：没图");
@@ -257,10 +250,11 @@ final class Beautifier {
         return cur;
     }
 
-    /** 只画顶部一条的 drawable，其余区域透明，让面板底色透出来 */
+    /** 只画顶部一条，底部渐变淡出，和面板底色自然接上 */
     private static final class TopImageDrawable extends Drawable {
         private final Bitmap bmp;
         private final Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
+        private Paint fade;
 
         TopImageDrawable(Bitmap bmp) {
             this.bmp = bmp;
@@ -269,7 +263,19 @@ final class Beautifier {
         @Override
         public void draw(Canvas canvas) {
             Rect b = getBounds();
-            canvas.drawBitmap(bmp, null, new Rect(b.left, b.top, b.left + bmp.getWidth(), b.top + bmp.getHeight()), paint);
+            Rect dst = new Rect(b.left, b.top, b.left + bmp.getWidth(), b.top + bmp.getHeight());
+            int layer = canvas.saveLayer(dst.left, dst.top, dst.right, dst.bottom, null);
+            canvas.drawBitmap(bmp, null, dst, paint);
+            int h = dst.height();
+            int fadeStart = dst.top + (int) (h * 0.62f);
+            if (fade == null) {
+                fade = new Paint();
+                fade.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
+                fade.setShader(new LinearGradient(0, fadeStart, 0, dst.bottom,
+                        0xFFFFFFFF, 0x00000000, Shader.TileMode.CLAMP));
+            }
+            canvas.drawRect(dst.left, fadeStart, dst.right, dst.bottom, fade);
+            canvas.restoreToCount(layer);
         }
 
         @Override
