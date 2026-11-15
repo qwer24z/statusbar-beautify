@@ -46,6 +46,7 @@ public class HookMain implements IXposedHookLoadPackage {
         hookSystemUiApp(lp.classLoader);
         hookStatusBarWindow(lp.classLoader);
         hookViewRoot(lp.classLoader);
+        hookPanelExpand(lp.classLoader);
         // 标头小 View 这两条路会让图铺到 1160x2800 这种整屏容器上，先停用
         // hookQsHeader(lp.classLoader);
         // hookLayoutInflater(lp.classLoader);
@@ -123,9 +124,7 @@ public class HookMain implements IXposedHookLoadPackage {
                         Diag.log("ViewRootImpl.setView 命中状态栏窗口");
                         Beautifier.attach((View) view);
                     } else if (type == TYPE_NOTIFICATION_SHADE) {
-                        Diag.log("ViewRootImpl.setView 命中下拉窗口");
-                        // 只走整屏容器 foreground 这一条，别让「标头小 View」那条再抢
-                        Beautifier.attachPanel((View) view);
+                        Diag.log("ViewRootImpl.setView 命中下拉窗口（等展开再铺）");
                     }
                 }
             });
@@ -154,6 +153,38 @@ public class HookMain implements IXposedHookLoadPackage {
             });
         } catch (Throwable t) {
             Diag.log("QS 标头钩子挂不上 " + t);
+        }
+    }
+
+    /** 面板展开到基本全屏才铺图，收起就清掉；锁屏时面板没展开，自然不会有图 */
+    private static void hookPanelExpand(ClassLoader cl) {
+        try {
+            Class<?> cls = XposedHelpers.findClass("com.android.systemui.shade.NotificationPanelView", cl);
+            XposedBridge.hookAllMethods(cls, "setExpandedHeight", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    Object self = param.thisObject;
+                    if (!(self instanceof View) || param.args == null || param.args.length == 0) {
+                        return;
+                    }
+                    Object arg = param.args[0];
+                    if (!(arg instanceof Float)) {
+                        return;
+                    }
+                    float h = (Float) arg;
+                    View v = (View) self;
+                    int screen = v.getResources().getDisplayMetrics().heightPixels;
+                    if (h >= screen * 0.9f) {
+                        Diag.log("面板展开 h=" + Math.round(h));
+                        Beautifier.attachPanel(v);
+                    } else if (h <= screen * 0.15f) {
+                        Beautifier.clearPanels();
+                    }
+                }
+            });
+            Diag.log("面板展开钩子装好了");
+        } catch (Throwable t) {
+            Diag.log("面板展开钩子挂不上 " + t);
         }
     }
 

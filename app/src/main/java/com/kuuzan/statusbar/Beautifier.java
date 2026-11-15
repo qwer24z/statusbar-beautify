@@ -47,6 +47,7 @@ final class Beautifier {
     private static final Set<View> DONE = Collections.newSetFromMap(new WeakHashMap<View, Boolean>());
     private static final Set<View> DONE_HEADER = Collections.newSetFromMap(new WeakHashMap<View, Boolean>());
     private static final Set<View> DONE_SHADE = Collections.newSetFromMap(new WeakHashMap<View, Boolean>());
+    private static final Set<View> PAINTED = Collections.newSetFromMap(new WeakHashMap<View, Boolean>());
 
     private Beautifier() {
     }
@@ -183,6 +184,7 @@ final class Beautifier {
                         }
                         final TopImageDrawable fg = new TopImageDrawable(bmp);
                         target.setForeground(fg);
+                        PAINTED.add(target);
                         Diag.log("标头图铺在 " + target.getClass().getName()
                                 + " w=" + w + " h=" + h + " pct=" + pct);
                         final View again = target;
@@ -201,6 +203,21 @@ final class Beautifier {
                 }
             }
         });
+    }
+
+    /** 面板收起时把图清掉，免得锁屏、桌面也带着一条 */
+    static void clearPanels() {
+        if (PAINTED.isEmpty()) {
+            return;
+        }
+        for (View v : PAINTED) {
+            try {
+                v.setForeground(null);
+            } catch (Throwable ignored) {
+            }
+        }
+        PAINTED.clear();
+        Diag.log("面板收起，标头图已清");
     }
 
     private static View nextFullSizeChild(View cur) {
@@ -264,18 +281,7 @@ final class Beautifier {
         public void draw(Canvas canvas) {
             Rect b = getBounds();
             Rect dst = new Rect(b.left, b.top, b.left + bmp.getWidth(), b.top + bmp.getHeight());
-            int layer = canvas.saveLayer(dst.left, dst.top, dst.right, dst.bottom, null);
             canvas.drawBitmap(bmp, null, dst, paint);
-            int h = dst.height();
-            int fadeStart = dst.top + (int) (h * 0.62f);
-            if (fade == null) {
-                fade = new Paint();
-                fade.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
-                fade.setShader(new LinearGradient(0, fadeStart, 0, dst.bottom,
-                        0xFFFFFFFF, 0x00000000, Shader.TileMode.CLAMP));
-            }
-            canvas.drawRect(dst.left, fadeStart, dst.right, dst.bottom, fade);
-            canvas.restoreToCount(layer);
         }
 
         @Override
