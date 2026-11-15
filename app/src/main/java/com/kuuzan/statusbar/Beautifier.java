@@ -48,6 +48,8 @@ final class Beautifier {
     private static final Set<View> DONE_HEADER = Collections.newSetFromMap(new WeakHashMap<View, Boolean>());
     private static final Set<View> DONE_SHADE = Collections.newSetFromMap(new WeakHashMap<View, Boolean>());
     private static final Set<View> PAINTED = Collections.newSetFromMap(new WeakHashMap<View, Boolean>());
+    /** StatusBarState：0 = SHADE，1 = KEYGUARD，2 = SHADE_LOCKED；-1 = 还没拿到 */
+    private static volatile int SHADE_STATE = -1;
 
     private Beautifier() {
     }
@@ -206,6 +208,13 @@ final class Beautifier {
     }
 
     /** 面板收起时把图清掉，免得锁屏、桌面也带着一条 */
+    static void onState(int state) {
+        if (state != SHADE_STATE) {
+            Diag.log("状态变化 -> " + state);
+        }
+        SHADE_STATE = state;
+    }
+
     static void clearPanels() {
         if (PAINTED.isEmpty()) {
             return;
@@ -279,6 +288,10 @@ final class Beautifier {
 
         @Override
         public void draw(Canvas canvas) {
+            // 锁屏（KEYGUARD）不画，只有下拉面板状态才画
+            if (SHADE_STATE == 1) {
+                return;
+            }
             Rect b = getBounds();
             Rect dst = new Rect(b.left, b.top, b.left + bmp.getWidth(), b.top + bmp.getHeight());
             canvas.drawBitmap(bmp, null, dst, paint);

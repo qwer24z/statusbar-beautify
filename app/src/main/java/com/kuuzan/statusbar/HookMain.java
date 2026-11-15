@@ -46,7 +46,7 @@ public class HookMain implements IXposedHookLoadPackage {
         hookSystemUiApp(lp.classLoader);
         hookStatusBarWindow(lp.classLoader);
         hookViewRoot(lp.classLoader);
-        hookPanelExpand(lp.classLoader);
+        hookStatusBarState(lp.classLoader);
         // 标头小 View 这两条路会让图铺到 1160x2800 这种整屏容器上，先停用
         // hookQsHeader(lp.classLoader);
         // hookLayoutInflater(lp.classLoader);
@@ -124,7 +124,8 @@ public class HookMain implements IXposedHookLoadPackage {
                         Diag.log("ViewRootImpl.setView 命中状态栏窗口");
                         Beautifier.attach((View) view);
                     } else if (type == TYPE_NOTIFICATION_SHADE) {
-                        Diag.log("ViewRootImpl.setView 命中下拉窗口（等展开再铺）");
+                        Diag.log("ViewRootImpl.setView 命中下拉窗口");
+                        Beautifier.attachPanel((View) view);
                     }
                 }
             });
@@ -153,6 +154,30 @@ public class HookMain implements IXposedHookLoadPackage {
             });
         } catch (Throwable t) {
             Diag.log("QS 标头钩子挂不上 " + t);
+        }
+    }
+
+    /** 锁屏时别画：盯 StatusBarState（0 SHADE / 1 KEYGUARD / 2 SHADE_LOCKED） */
+    private static void hookStatusBarState(ClassLoader cl) {
+        String[] classes = {
+                "com.android.systemui.statusbar.StatusBarStateControllerImpl",
+                "com.android.systemui.statusbar.phone.StatusBarStateControllerImpl",
+        };
+        for (String cn : classes) {
+            try {
+                Class<?> c = XposedHelpers.findClass(cn, cl);
+                XposedBridge.hookAllMethods(c, "setState", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (param.args != null && param.args.length > 0 && param.args[0] instanceof Integer) {
+                            Beautifier.onState((Integer) param.args[0]);
+                        }
+                    }
+                });
+                Diag.log("状态钩子装好 " + cn);
+            } catch (Throwable t) {
+                Diag.log("状态钩子挂不上 " + cn);
+            }
         }
     }
 
