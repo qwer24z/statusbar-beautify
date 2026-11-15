@@ -123,8 +123,8 @@ public class HookMain implements IXposedHookLoadPackage {
                         Beautifier.attach((View) view);
                     } else if (type == TYPE_NOTIFICATION_SHADE) {
                         Diag.log("ViewRootImpl.setView 命中下拉窗口");
+                        // 只走整屏容器 foreground 这一条，别让「标头小 View」那条再抢
                         Beautifier.attachPanel((View) view);
-                        Beautifier.attachShade((View) view);
                     }
                 }
             });
