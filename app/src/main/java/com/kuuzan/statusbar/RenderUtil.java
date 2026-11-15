@@ -3,9 +3,13 @@ package com.kuuzan.statusbar;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.LinearGradient;
 import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.Shader;
 
 /** 把选好的图裁成状态栏尺寸，再做暗化 / 模糊。设置页预览和 SystemUI 里用的是同一段。 */
 public final class RenderUtil {
@@ -58,6 +62,28 @@ public final class RenderUtil {
             Blur.blur(out, blurPx);
         }
         return out;
+    }
+
+    /** 底部 fadeFrac（0-1）渐变擦成透明，让图和面板底色接上 */
+    public static void fadeBottom(Bitmap bmp, float fadeFrac) {
+        if (bmp == null || fadeFrac <= 0f) {
+            return;
+        }
+        float f = Math.min(1f, fadeFrac);
+        int w = bmp.getWidth();
+        int h = bmp.getHeight();
+        int start = Math.round(h * (1f - f));
+        if (start >= h - 1) {
+            return;
+        }
+        Canvas canvas = new Canvas(bmp);
+        int layer = canvas.saveLayer(0, 0, w, h, null);
+        Paint p = new Paint();
+        p.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
+        p.setShader(new LinearGradient(0, start, 0, h, 0xFFFFFFFF, 0x00000000,
+                Shader.TileMode.CLAMP));
+        canvas.drawRect(0, start, w, h, p);
+        canvas.restoreToCount(layer);
     }
 
     private static int clamp(int v, int lo, int hi) {

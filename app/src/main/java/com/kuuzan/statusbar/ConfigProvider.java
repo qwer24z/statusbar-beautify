@@ -22,7 +22,7 @@ public class ConfigProvider extends ContentProvider {
     public static final Uri URI = Uri.parse("content://" + AUTHORITY + "/config");
 
     public static final String[] COLUMNS = {
-            "enabled", "image", "corner", "dim", "blur", "status", "header", "header_height"
+            "enabled", "image", "corner", "dim", "blur", "status", "header", "header_height", "fade"
     };
 
     /** SystemUI 那边写过来的诊断行，App 进程里读 */
@@ -80,6 +80,7 @@ public class ConfigProvider extends ContentProvider {
                 p.getBoolean(Prefs.KEY_STATUS, Prefs.DEF_STATUS) ? 1 : 0,
                 p.getBoolean(Prefs.KEY_HEADER, Prefs.DEF_HEADER) ? 1 : 0,
                 p.getInt(Prefs.KEY_HEADER_HEIGHT, Prefs.DEF_HEADER_HEIGHT),
+                p.getInt(Prefs.KEY_FADE, Prefs.DEF_FADE),
         });
         return cursor;
     }

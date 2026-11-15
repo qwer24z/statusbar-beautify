@@ -590,6 +590,7 @@ final class Beautifier {
             float frac = shadeFraction();
             boolean show = on && SHADE_STATE != 1 && frac > 0f;
             iv.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
+            box.setAlpha(show ? computeAlpha(frac) : 1f);
             if (!show) {
                 return;
             }
@@ -608,6 +609,7 @@ final class Beautifier {
             if (bmp == null) {
                 return;
             }
+            RenderUtil.fadeBottom(bmp, cfg.fade / 100f);
             iv.setImageBitmap(bmp);
             ViewGroup.LayoutParams lp = box.getLayoutParams();
             if (lp.height != h) {
@@ -632,6 +634,65 @@ final class Beautifier {
         } catch (Throwable t) {
             Diag.log("updatePanelImage 失败 " + t);
         }
+    }
+
+    private static boolean openingLoop;
+
+    static void startOpeningLoop() {
+        if (openingLoop) {
+            return;
+        }
+        openingLoop = true;
+        Diag.log("展开动画循环开始");
+        frameTick();
+    }
+
+    static void stopOpeningLoop() {
+        openingLoop = false;
+        updatePanelAlpha();
+        Diag.log("展开动画循环结束");
+    }
+
+    private static void frameTick() {
+        if (!openingLoop) {
+            return;
+        }
+        updatePanelAlpha();
+        android.view.Choreographer.getInstance().postFrameCallback(
+                new android.view.Choreographer.FrameCallback() {
+                    @Override
+                    public void doFrame(long frameTimeNanos) {
+                        frameTick();
+                    }
+                });
+    }
+
+    private static void updatePanelAlpha() {
+        try {
+            View box = headerBox;
+            if (box == null) {
+                return;
+            }
+            float frac = shadeFraction();
+            boolean show = SHADE_STATE != 1 && frac > 0f;
+            box.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
+            if (show) {
+                box.setAlpha(computeAlpha(frac));
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static float computeAlpha(float frac) {
+        // 0.35~0.7 之间淡入，和面板展开动画同步
+        float a = (frac - 0.35f) / 0.35f;
+        if (a < 0f) {
+            a = 0f;
+        }
+        if (a > 1f) {
+            a = 1f;
+        }
+        return a;
     }
 
     private static float shadeFraction() {
@@ -721,6 +782,7 @@ final class Beautifier {
         boolean status = Prefs.DEF_STATUS;
         boolean header = Prefs.DEF_HEADER;
         int headerHeight = Prefs.DEF_HEADER_HEIGHT;
+        int fade = Prefs.DEF_FADE;
         String via = "?";
 
         static Cfg load() {
@@ -764,6 +826,7 @@ final class Beautifier {
                     cfg.status = c.getInt(5) != 0;
                     cfg.header = c.getInt(6) != 0;
                     cfg.headerHeight = c.getInt(7);
+                    cfg.fade = c.getInt(8);
                     return cfg;
                 } finally {
                     c.close();
@@ -786,6 +849,7 @@ final class Beautifier {
                 cfg.status = p.getBoolean(Prefs.KEY_STATUS, Prefs.DEF_STATUS);
                 cfg.header = p.getBoolean(Prefs.KEY_HEADER, Prefs.DEF_HEADER);
                 cfg.headerHeight = p.getInt(Prefs.KEY_HEADER_HEIGHT, Prefs.DEF_HEADER_HEIGHT);
+                cfg.fade = p.getInt(Prefs.KEY_FADE, Prefs.DEF_FADE);
                 return cfg;
             } catch (Throwable t) {
                 Diag.log("XSharedPreferences 读配置失败 " + t);

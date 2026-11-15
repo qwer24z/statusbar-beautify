@@ -171,6 +171,25 @@ public class HookMain implements IXposedHookLoadPackage {
             };
             XposedBridge.hookAllMethods(cls, "onFinishInflate", cb);
             XposedBridge.hookAllMethods(cls, "reInflateViews", cb);
+            // 面板开合状态（0 关 / 1 开合中 / 2 开），驱动淡入动画
+            for (java.lang.reflect.Method m : cls.getDeclaredMethods()) {
+                if (m.getName().startsWith("onPanelStateChanged")) {
+                    XposedBridge.hookMethod(m, new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            if (param.args != null && param.args.length > 0
+                                    && param.args[0] instanceof Integer) {
+                                int st = (Integer) param.args[0];
+                                if (st == 1) {
+                                    Beautifier.startOpeningLoop();
+                                } else {
+                                    Beautifier.stopOpeningLoop();
+                                }
+                            }
+                        }
+                    });
+                }
+            }
             Diag.log("面板控制器钩子装好");
         } catch (Throwable t) {
             Diag.log("面板控制器钩子挂不上 " + t);
