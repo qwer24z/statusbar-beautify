@@ -22,6 +22,8 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import java.io.File;
@@ -31,6 +33,7 @@ import java.util.Set;
 import java.util.WeakHashMap;
 
 import de.robv.android.xposed.XSharedPreferences;
+import de.robv.android.xposed.XposedHelpers;
 
 /**
  * 两个地方铺图：
@@ -213,6 +216,14 @@ final class Beautifier {
             Diag.log("状态变化 -> " + state);
         }
         SHADE_STATE = state;
+        if (panelView != null) {
+            panelView.post(new Runnable() {
+                @Override
+                public void run() {
+                    updatePanelImage();
+                }
+            });
+        }
     }
 
     static void clearPanels() {
@@ -500,6 +511,149 @@ final class Beautifier {
         });
         root.setClipToOutline(true);
         root.invalidateOutline();
+    }
+
+    // ---------------- Iconify 式：往 NotificationPanelView 插 ImageView ----------------
+
+    private static final String TAG_IMG = "sb_header_image";
+    private static Object shadeHeaderController;
+    private static ViewGroup panelView;
+    private static View headerBox;
+
+    static void setHeaderController(Object o) {
+        shadeHeaderController = o;
+        Diag.log("拿到 ShadeHeaderController " + (o == null ? "null" : o.getClass().getName()));
+    }
+
+    /** 从 NotificationPanelViewController 拿 mView，往 index 0 插一个带 ImageView 的容器 */
+    static void injectPanelImage(Object controller) {
+        try {
+            Object mv = XposedHelpers.getObjectField(controller, "mView");
+            if (!(mv instanceof ViewGroup)) {
+                Diag.log("mView 不是 ViewGroup：" + mv);
+                return;
+            }
+            final ViewGroup panel = (ViewGroup) mv;
+            panelView = panel;
+            View existing = panel.findViewWithTag(TAG_IMG);
+            if (existing == null) {
+                FrameLayout box = new FrameLayout(panel.getContext());
+                box.setTag(TAG_IMG);
+                ImageView iv = new ImageView(panel.getContext());
+                iv.setScaleType(ImageView.ScaleType.FIT_XY);
+                box.addView(iv, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                int m = Math.round(16 * panel.getResources().getDisplayMetrics().density);
+                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                lp.leftMargin = -m;
+                lp.rightMargin = -m;
+                panel.addView(box, 0, lp);
+                Diag.log("标头图容器已插入 " + panel.getClass().getName());
+            }
+            headerBox = panel.findViewWithTag(TAG_IMG);
+            panel.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+                @Override
+                public void onLayoutChange(View v, int l, int t, int r, int b,
+                                           int ol, int ot, int or, int ob) {
+                    updatePanelImage();
+                }
+            });
+            panel.post(new Runnable() {
+                @Override
+                public void run() {
+                    updatePanelImage();
+                }
+            });
+            panel.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    updatePanelImage();
+                }
+            }, 900);
+            updatePanelImage();
+        } catch (Throwable t) {
+            Diag.log("注入标头图失败 " + t);
+        }
+    }
+
+    private static void updatePanelImage() {
+        try {
+            ViewGroup panel = panelView;
+            View box = headerBox;
+            if (panel == null || box == null || !(box instanceof ViewGroup)) {
+                return;
+            }
+            ImageView iv = (ImageView) ((ViewGroup) box).getChildAt(0);
+            Cfg cfg = Cfg.load();
+            boolean on = cfg != null && cfg.header;
+            float frac = shadeFraction();
+            boolean show = on && SHADE_STATE != 1 && frac > 0f;
+            iv.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
+            if (!show) {
+                return;
+            }
+            Bitmap src = loadImage(cfg);
+            if (src == null) {
+                return;
+            }
+            int screenH = panel.getResources().getDisplayMetrics().heightPixels;
+            int pct = Math.max(8, Math.min(60, cfg.headerHeight));
+            int h = (int) (screenH * pct / 100f);
+            int w = panel.getWidth() > 0 ? panel.getWidth()
+                    : panel.getResources().getDisplayMetrics().widthPixels;
+            Bitmap bmp = RenderUtil.render(src, w, h,
+                    Math.max(0, Math.min(80, cfg.dim)),
+                    Math.round(Math.max(0, cfg.blur) * panel.getResources().getDisplayMetrics().density));
+            if (bmp == null) {
+                return;
+            }
+            iv.setImageBitmap(bmp);
+            ViewGroup.LayoutParams lp = box.getLayoutParams();
+            if (lp.height != h) {
+                lp.height = h;
+                box.setLayoutParams(lp);
+            }
+            int cornerPx = Math.round(Math.max(0, cfg.corner)
+                    * panel.getResources().getDisplayMetrics().density);
+            if (cornerPx > 0) {
+                final int c = cornerPx;
+                iv.setOutlineProvider(new ViewOutlineProvider() {
+                    @Override
+                    public void getOutline(View v, Outline o) {
+                        o.setRoundRect(0, 0, v.getWidth(), v.getHeight(),
+                                Math.min(c, Math.min(v.getWidth(), v.getHeight()) / 2f));
+                    }
+                });
+                iv.setClipToOutline(true);
+            } else {
+                iv.setClipToOutline(false);
+            }
+        } catch (Throwable t) {
+            Diag.log("updatePanelImage 失败 " + t);
+        }
+    }
+
+    private static float shadeFraction() {
+        try {
+            if (shadeHeaderController == null) {
+                return 1f;
+            }
+            try {
+                return XposedHelpers.getFloatField(shadeHeaderController, "shadeExpandedFraction");
+            } catch (Throwable t) {
+                Object f = XposedHelpers.getObjectField(shadeHeaderController, "shadeExpandedFraction");
+                if (f instanceof Float) {
+                    return (Float) f;
+                }
+                if (f instanceof Double) {
+                    return (float) (double) (Double) f;
+                }
+                return 1f;
+            }
+        } catch (Throwable t) {
+            return 1f;
+        }
     }
 
     private static String imageFrom = "?";

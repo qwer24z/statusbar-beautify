@@ -47,6 +47,8 @@ public class HookMain implements IXposedHookLoadPackage {
         hookStatusBarWindow(lp.classLoader);
         hookViewRoot(lp.classLoader);
         hookStatusBarState(lp.classLoader);
+        hookPanelController(lp.classLoader);
+        hookShadeHeader(lp.classLoader);
         // 标头小 View 这两条路会让图铺到 1160x2800 这种整屏容器上，先停用
         // hookQsHeader(lp.classLoader);
         // hookLayoutInflater(lp.classLoader);
@@ -125,7 +127,6 @@ public class HookMain implements IXposedHookLoadPackage {
                         Beautifier.attach((View) view);
                     } else if (type == TYPE_NOTIFICATION_SHADE) {
                         Diag.log("ViewRootImpl.setView 命中下拉窗口");
-                        Beautifier.attachPanel((View) view);
                     }
                 }
             });
@@ -154,6 +155,42 @@ public class HookMain implements IXposedHookLoadPackage {
             });
         } catch (Throwable t) {
             Diag.log("QS 标头钩子挂不上 " + t);
+        }
+    }
+
+    /** Iconify 的套路：从 NotificationPanelViewController 拿 mView，往里插图 */
+    private static void hookPanelController(ClassLoader cl) {
+        try {
+            Class<?> cls = XposedHelpers.findClass(
+                    "com.android.systemui.shade.NotificationPanelViewController", cl);
+            XC_MethodHook cb = new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    Beautifier.injectPanelImage(param.thisObject);
+                }
+            };
+            XposedBridge.hookAllMethods(cls, "onFinishInflate", cb);
+            XposedBridge.hookAllMethods(cls, "reInflateViews", cb);
+            Diag.log("面板控制器钩子装好");
+        } catch (Throwable t) {
+            Diag.log("面板控制器钩子挂不上 " + t);
+        }
+    }
+
+    /** ShadeHeaderController 里的 shadeExpandedFraction 用来判断面板开没开 */
+    private static void hookShadeHeader(ClassLoader cl) {
+        try {
+            Class<?> cls = XposedHelpers.findClass(
+                    "com.android.systemui.shade.ShadeHeaderController", cl);
+            XposedBridge.hookAllMethods(cls, "onInit", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    Beautifier.setHeaderController(param.thisObject);
+                }
+            });
+            Diag.log("ShadeHeaderController 钩子装好");
+        } catch (Throwable t) {
+            Diag.log("ShadeHeaderController 钩子挂不上 " + t);
         }
     }
 
