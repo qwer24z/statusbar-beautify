@@ -174,9 +174,21 @@ final class Beautifier {
                     if (bmp == null) {
                         return;
                     }
-                    panel.setForeground(new TopImageDrawable(bmp));
+                    final TopImageDrawable fg = new TopImageDrawable(bmp);
+                    panel.setForeground(fg);
                     Diag.log("标头图铺在 " + panel.getClass().getName()
                             + " w=" + w + " h=" + h + " pct=" + pct);
+                    final View again = panel;
+                    panel.postDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                again.setForeground(fg);
+                                Diag.log("标头图二次下发");
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    }, 1200);
                 } catch (Throwable t) {
                     Diag.log("attachPanel 失败 " + t);
                 }
@@ -186,14 +198,17 @@ final class Beautifier {
 
     private static View deepestFullSize(View v) {
         View cur = v;
-        while (cur instanceof ViewGroup) {
+        int depth = 0;
+        while (cur instanceof ViewGroup && depth < 30) {
             ViewGroup g = (ViewGroup) cur;
             View next = null;
             for (int i = 0; i < g.getChildCount(); i++) {
                 View c = g.getChildAt(i);
-                if (c.getVisibility() == View.VISIBLE
+                boolean fullSize = c.getVisibility() == View.VISIBLE
                         && c.getWidth() >= cur.getWidth() - 2
-                        && c.getHeight() >= cur.getHeight() - 2) {
+                        && c.getHeight() >= cur.getHeight() - 2;
+                // 跳过叶子 View（遮罩、壁纸模糊层、纯色背景），只往装内容的容器钻
+                if (fullSize && c instanceof ViewGroup && ((ViewGroup) c).getChildCount() > 0) {
                     next = c;
                     break;
                 }
@@ -201,7 +216,11 @@ final class Beautifier {
             if (next == null) {
                 break;
             }
+            Diag.log("容器候选[" + depth + "] " + next.getClass().getName()
+                    + " children=" + ((ViewGroup) next).getChildCount()
+                    + " " + next.getWidth() + "x" + next.getHeight());
             cur = next;
+            depth++;
         }
         return cur;
     }
